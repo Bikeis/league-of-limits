@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>League of Limits</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="game.js" defer></script>
+</head>
+<body>
+  <main class="game-shell" aria-labelledby="game-title">
+    <section id="start-screen" class="start-screen">
+      <h1 id="game-title" class="sr-only">League of Limits</h1>
+      <div class="title-wrap">
+        <img class="game-logo" src="assets/media/photos/Logo.png" alt="League of Limits logo">
+        <p class="project-label">Group 4 Culminating Project</p>
+        <p class="game-tagline">A turn-based Basic Calculus card game about limits and continuity.</p>
+      </div>
+
+      <div class="start-actions">
+        <button id="start-button" class="start-button" type="button">Start</button>
+        <button id="how-to-play-button" class="secondary-button how-button" type="button">How to Play</button>
+      </div>
+    </section>
+
+    <section id="lobby-screen" class="lobby-screen" aria-labelledby="lobby-title" hidden>
+      <div class="section-heading">
+        <p class="project-label">League of Limits</p>
+        <h2 id="lobby-title">Choose Match</h2>
+      </div>
+
+      <div class="mode-grid">
+        <button id="npc-mode-button" class="mode-card" type="button">
+          <span>Play with NPCs</span>
+          <small>Fill the empty seats with computer players.</small>
+        </button>
+
+        <button id="friends-mode-button" class="mode-card" type="button">
+          <span>Play with Friends</span>
+          <small>Create a room and invite friends with a link.</small>
+        </button>
+      </div>
+
+      <section class="lobby-panel" aria-labelledby="players-title">
+        <div class="lobby-heading">
+          <div>
+            <p class="panel-kicker">Players</p>
+            <h3 id="players-title">Room Slots</h3>
+          </div>
+          <p id="lobby-status">Choose a match type.</p>
+        </div>
+
+        <div id="lobby-slots" class="lobby-slots"></div>
+
+        <div id="invite-panel" class="invite-panel" hidden>
+          <label for="invite-link">Invite Link</label>
+          <div class="invite-row">
+            <input id="invite-link" type="text" readonly value="">
+            <button id="copy-link-button" class="secondary-button" type="button">Copy</button>
+          </div>
+        </div>
+
+        <div class="lobby-actions">
+          <button id="start-match-button" class="start-button" type="button" disabled>Start Match</button>
+          <button id="lobby-back-button" class="secondary-button" type="button">Back</button>
+        </div>
+      </section>
+    </section>
+
+    <section id="game-screen" class="game-screen" aria-labelledby="match-title" hidden>
+      <div class="section-heading match-heading">
+        <div>
+          <p class="project-label">League of Limits</p>
+          <h2 id="match-title">Match Table</h2>
+        </div>
+        <div class="turn-status" aria-live="polite">
+          <span id="turn-counter" class="turn-counter">Turn 1</span>
+          <strong id="active-player">Player 1</strong>
+          <span id="timer-display" class="timer-display">--</span>
+        </div>
+      </div>
+
+      <div class="match-layout">
+        <div class="table-column">
+          <section id="table-layout" class="table-layout" aria-label="Game table">
+            <div id="top-opponent" class="opponent-row opponent-top"></div>
+            <div id="left-opponent" class="opponent-side opponent-left"></div>
+            <div class="center-play">
+              <button id="deck-stack-button" class="deck-stack" type="button" aria-label="Draw a card from the deck">
+                <img src="assets/media/photos/action/blue_back_card.jpg" alt="Blue deck back">
+                <span>Draw <strong id="deck-count">24</strong></span>
+              </button>
+              <div id="current-card" class="current-card"></div>
+              <div class="discard-stack">
+                <img src="assets/media/photos/action/yellow_back_card.jpg" alt="Yellow discard back">
+                <span>Used <strong id="discard-count">0</strong></span>
+              </div>
+            </div>
+            <div id="right-opponent" class="opponent-side opponent-right"></div>
+            <div id="active-hand" class="active-hand"></div>
+            <div id="dice-roll-panel" class="dice-roll-panel" aria-live="polite"></div>
+          </section>
+
+          <section class="control-panel" aria-label="Game controls">
+            <p id="feedback-message">Roll dice to determine turn order.</p>
+            <div class="primary-actions">
+              <button id="roll-order-button" class="control-button" type="button">Roll Dice</button>
+              <button id="draw-card-button" class="control-button" type="button">Draw Card</button>
+            </div>
+            <div class="leave-actions">
+              <button id="back-button" class="control-button leave-button" type="button">Leave Match</button>
+            </div>
+          </section>
+        </div>
+      </div>
+    </section>
+
+    <dialog id="how-to-play-modal" class="how-modal">
+      <div class="how-modal-content">
+        <div class="how-modal-heading">
+          <div>
+            <p class="panel-kicker">League of Limits</p>
+            <h2>How to Play</h2>
+            <p class="how-intro">Solve calculus questions, outscore your rivals, and stay in the game.</p>
+          </div>
+          <button id="close-how-to-play" class="secondary-button how-close-button" type="button" aria-label="Close how to play">Close</button>
+        </div>
+
+        <section class="goal-panel" aria-labelledby="goal-title">
+          <div class="goal-copy">
+            <p class="panel-kicker">Your Goal</p>
+            <h3 id="goal-title">Reach <strong>15 CP</strong> to earn a placement, or outlast everyone to win the match.</h3>
+            <p class="match-start"><strong>Before play:</strong> Everyone rolls two dice. The lowest total takes the first turn.</p>
+          </div>
+          <div class="stat-key" aria-label="Starting stats">
+            <div><strong>8</strong><span>Starting HP</span></div>
+            <div><strong>0</strong><span>Starting CP</span></div>
+          </div>
+        </section>
+
+        <section class="rules-panel" aria-labelledby="turn-title">
+          <div class="section-heading">
+            <div>
+              <p class="panel-kicker">The Basics</p>
+              <h3 id="turn-title">What happens on your turn</h3>
+            </div>
+            <p><strong>CP</strong> = Calculus Points</p>
+          </div>
+          <ol id="rules-list" class="rules-list"></ol>
+        </section>
+
+        <section class="setup-panel" aria-labelledby="difficulty-title">
+          <div class="section-heading">
+            <div>
+              <p class="panel-kicker">Risk &amp; Reward</p>
+              <h3 id="difficulty-title">Question difficulty</h3>
+            </div>
+            <p>Harder cards give you more time and bigger rewards.</p>
+          </div>
+          <div id="difficulty-tiers" class="tier-list"></div>
+        </section>
+
+        <section class="concept-panel" aria-labelledby="effects-title">
+          <div class="section-heading">
+            <div>
+              <p class="panel-kicker">Power Cards</p>
+              <h3 id="effects-title">Effects earned with a correct answer</h3>
+            </div>
+            <p>Every question card also carries one of these effects.</p>
+          </div>
+          <div id="concept-list" class="concept-list"></div>
+        </section>
+
+        <p class="how-tip"><strong>Quick tip:</strong> Watch your timer, and type answers like <span>1/2</span>, <span>Yes</span>, or <span>Infinity</span>. At 0 HP, you are eliminated.</p>
+      </div>
+    </dialog>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  </main>
+</body>
+</html>

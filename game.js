@@ -3,6 +3,8 @@
 const SUPABASE_URL = "https://wnbxdoesaaafesvpkbvv.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_DbsYeFZT8kQdY4euO5PSTw_c8566AiQ";
 const realtimeClient = window.supabase?.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY) || null;
+const MULTIPLAYER_BUILD = "multiplayer-3";
+document.documentElement.dataset.multiplayerBuild = MULTIPLAYER_BUILD;
 
 const startScreen = document.querySelector("#start-screen");
 const lobbyScreen = document.querySelector("#lobby-screen");
@@ -260,6 +262,8 @@ let roomChannel = null;
 let roomCode = null;
 let isRoomHost = false;
 let roomPlayers = [];
+let roomSeatPlayerIds = [];
+let roomSyncTimer = null;
 let isApplyingRoomState = false;
 const localRoomPlayerId = sessionStorage.getItem("league-player-id") || crypto.randomUUID();
 sessionStorage.setItem("league-player-id", localRoomPlayerId);
@@ -442,7 +446,7 @@ function getLocalGamePlayer() {
     return players.find((player) => player.id === 1) || null;
   }
 
-  const seatIndex = roomPlayers.findIndex((presence) => presence.playerId === localRoomPlayerId);
+  const seatIndex = roomSeatPlayerIds.indexOf(localRoomPlayerId);
   return players[seatIndex] || null;
 }
 
@@ -453,6 +457,8 @@ async function sendRoomEvent(event, payload) {
 
 function buildRoomState() {
   return {
+    build: MULTIPLAYER_BUILD,
+    roomSeatPlayerIds,
     players,
     deck,
     discardPile,
@@ -486,6 +492,7 @@ function applyRoomState(state) {
   clearTurnAdvanceTimeout();
   stopTimer();
   players = state.players || [];
+  roomSeatPlayerIds = state.roomSeatPlayerIds || roomSeatPlayerIds;
   deck = state.deck || [];
   discardPile = state.discardPile || [];
   placements = state.placements || [];
@@ -505,8 +512,23 @@ function requestHostAction(action, data = {}) {
 }
 
 function getGamePlayerForRoomId(roomPlayerId) {
-  const seatIndex = roomPlayers.findIndex((presence) => presence.playerId === roomPlayerId);
+  const seatIndex = roomSeatPlayerIds.indexOf(roomPlayerId);
   return players[seatIndex] || null;
+}
+
+function startRoomSyncHeartbeat() {
+  stopRoomSyncHeartbeat();
+  if (!isRoomHost || lobbyMode !== "friends") return;
+  roomSyncTimer = window.setInterval(() => {
+    if (!gameScreen.hidden && players.length > 0) broadcastRoomState();
+  }, 1200);
+}
+
+function stopRoomSyncHeartbeat() {
+  if (roomSyncTimer) {
+    window.clearInterval(roomSyncTimer);
+    roomSyncTimer = null;
+  }
 }
 
 function handleGuestAction(payload) {
@@ -1543,6 +1565,7 @@ function getPresencePlayers() {
 }
 
 async function leaveRealtimeRoom() {
+  stopRoomSyncHeartbeat();
   if (roomChannel && realtimeClient) {
     await realtimeClient.removeChannel(roomChannel);
   }
@@ -1550,6 +1573,7 @@ async function leaveRealtimeRoom() {
   roomChannel = null;
   roomCode = null;
   roomPlayers = [];
+  roomSeatPlayerIds = [];
   isRoomHost = false;
 }
 
@@ -1571,6 +1595,7 @@ async function connectToRoom(code, hostRoom = false) {
   roomChannel = realtimeClient.channel(`league-room:${roomCode}`, {
     config: {
       presence: { key: localRoomPlayerId },
+      broadcast: { ack: true, self: false },
     },
   });
 
@@ -1600,7 +1625,7 @@ async function connectToRoom(code, hostRoom = false) {
       handleGuestAction(payload);
     })
     .on("broadcast", { event: "state_request" }, () => {
-      if (isRoomHost && turnState.isStarted) broadcastRoomState();
+      if (isRoomHost && !gameScreen.hidden && players.length > 0) broadcastRoomState();
     })
     .subscribe(async (status) => {
       if (status === "SUBSCRIBED") {
@@ -1835,9 +1860,14 @@ startMatchButton.addEventListener("click", () => {
   gameScreen.hidden = false;
   document.body.classList.add("is-match");
   syncBackgroundMusic();
+  if (lobbyMode === "friends") {
+    roomPlayers = getPresencePlayers();
+    roomSeatPlayerIds = roomPlayers.map((presence) => presence.playerId);
+  }
   resetGame(getJoinedLobbyPlayers());
   if (lobbyMode === "friends" && isRoomHost) {
     sendRoomEvent("match_start", { state: buildRoomState() });
+    startRoomSyncHeartbeat();
   }
 });
 

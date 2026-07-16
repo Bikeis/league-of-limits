@@ -32,6 +32,16 @@ const diceRollPanelElement = document.querySelector("#dice-roll-panel");
 const rulesListElement = document.querySelector("#rules-list");
 const conceptListElement = document.querySelector("#concept-list");
 const toastElement = document.querySelector("#toast");
+const settingsButton = document.querySelector("#settings-button");
+const menuSettingsButton = document.querySelector("#menu-settings-button");
+const settingsModal = document.querySelector("#settings-modal");
+const muteButton = document.querySelector("#mute-button");
+const volumeInputs = {
+  master: document.querySelector("#master-volume"),
+  ui: document.querySelector("#ui-volume"),
+  game: document.querySelector("#game-volume"),
+  music: document.querySelector("#music-volume"),
+};
 const tableLayoutElement = document.querySelector("#table-layout");
 const topOpponentElement = document.querySelector("#top-opponent");
 const leftOpponentElement = document.querySelector("#left-opponent");
@@ -40,6 +50,7 @@ const activeHandElement = document.querySelector("#active-hand");
 const currentCardElement = document.querySelector("#current-card");
 const deckCountElement = document.querySelector("#deck-count");
 const discardCountElement = document.querySelector("#discard-count");
+const playedCardPileElement = document.querySelector("#played-card-pile");
 const deckStackButton = document.querySelector("#deck-stack-button");
 
 const imagePaths = {
@@ -83,28 +94,28 @@ const actionTypes = [
     id: "shield",
     title: "Shield",
     concept: "Continuous Functions",
-    description: "Blocks the next damage received.",
+    description: "Prevents damage during the round it is played.",
     image: imagePaths.shield,
   },
   {
     id: "double-damage",
     title: "Double Damage",
     concept: "One-sided Limits",
-    description: "The next correct attack deals double damage.",
+    description: "Doubles damage on your next turn, then expires.",
     image: imagePaths.doubleDamage,
   },
   {
     id: "freeze",
     title: "Freeze",
     concept: "Discontinuous Functions and Infinite Limits",
-    description: "The next opponent misses one turn.",
+    description: "Choose an opponent. They skip their next turn.",
     image: imagePaths.freeze,
   },
   {
     id: "steal",
     title: "Steal",
     concept: "Indeterminate Forms",
-    description: "Take 1 CP from the opponent if possible.",
+    description: "Choose an opponent and steal one random card from their hand.",
     image: imagePaths.steal,
   },
 ];
@@ -192,20 +203,20 @@ const questionBank = [
 
 const gameRules = [
   {
-    title: "Draw a card",
-    description: "Press Draw Card to reveal a limit or continuity question.",
+    title: "Choose your move",
+    description: "On your first turn, draw one card. After that, either draw one card or play one from your hand.",
   },
   {
-    title: "Solve before time runs out",
-    description: "Enter your answer using the answer box on the table.",
+    title: "Drawing ends the turn",
+    description: "Build your hand for later, or spend your turn playing a question or action card.",
   },
   {
-    title: "Collect your reward",
-    description: "A correct answer gives you CP, damages an opponent, and activates the card's effect.",
+    title: "Resolve its effect",
+    description: "Choose question difficulty and solve it, or select a target for your action card.",
   },
   {
-    title: "Pass the turn",
-    description: "A wrong answer costs the card's HP penalty. A timeout costs 1 HP. The card returns to the deck.",
+    title: "Build the played pile",
+    description: "Used cards stack face-up at the center. When the deck empties, the pile is shuffled into a fresh deck.",
   },
 ];
 
@@ -224,10 +235,25 @@ let placements = [];
 let currentCard = null;
 let selectedHandIndex = -1;
 let timer = null;
+let timerMode = null;
+let rollAnimationTimer = null;
+let usedQuestionPrompts = new Set();
+let audioContext = null;
+let savedAudioSettings = null;
+try {
+  savedAudioSettings = JSON.parse(localStorage.getItem("league-audio-settings") || "null");
+} catch {
+  savedAudioSettings = null;
+}
+let audioSettings = { master: 0.7, ui: 0.65, game: 0.75, music: 0.35, muted: false, ...(savedAudioSettings || {}) };
+let musicTimer = null;
+let musicStep = 0;
+let musicMode = "menu";
 let toastTimer = null;
 let lobbyMode = null;
 let lobbyPlayers = ["Player 1", null, null, null];
 let npcTimeout = null;
+let turnAdvanceTimeout = null;
 let rollCountdownTimer = null;
 let rollCountdown = 15;
 let roomChannel = null;
@@ -244,7 +270,167 @@ const turnState = {
   isStarted: false,
   rollingPlayerIndex: 0,
   isRolling: false,
+  isMatchOver: false,
+  hasDrawn: false,
+  isResolving: false,
 };
+
+const DRAW_TIME_LIMIT = 12;
+const PLAY_TIME_LIMIT = 15;
+const CHOICE_TIME_LIMIT = 12;
+const MAX_HEALTH = 8;
+const CP_TO_WIN = 15;
+
+function getAudioContext() {
+  if (!audioContext) {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    audioContext = AudioContextClass ? new AudioContextClass() : null;
+  }
+
+  if (audioContext?.state === "suspended") {
+    audioContext.resume();
+  }
+
+  return audioContext;
+}
+
+function playTone(frequency, duration, options = {}) {
+  const context = getAudioContext();
+
+  if (!context) {
+    return;
+  }
+
+  const oscillator = context.createOscillator();
+  const gain = context.createGain();
+  const startAt = context.currentTime + (options.delay || 0);
+  const channelVolume = audioSettings[options.channel || "game"] ?? 1;
+  const volume = Math.min(0.28, (options.volume || 0.045) * 5 * audioSettings.master * channelVolume * (audioSettings.muted ? 0 : 1));
+
+  if (volume <= 0.0001) {
+    return;
+  }
+  oscillator.type = options.type || "sine";
+  oscillator.frequency.setValueAtTime(frequency, startAt);
+
+  if (options.endFrequency) {
+    oscillator.frequency.exponentialRampToValueAtTime(options.endFrequency, startAt + duration);
+  }
+
+  gain.gain.setValueAtTime(0.0001, startAt);
+  gain.gain.exponentialRampToValueAtTime(volume, startAt + 0.012);
+  gain.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
+  oscillator.connect(gain);
+  gain.connect(context.destination);
+  oscillator.start(startAt);
+  oscillator.stop(startAt + duration + 0.02);
+}
+
+function playSound(name) {
+  const sounds = {
+    hover: () => playTone(520, 0.035, { channel: "ui", volume: 0.012 }),
+    click: () => playTone(310, 0.055, { channel: "ui", type: "triangle", endFrequency: 390, volume: 0.022 }),
+    select: () => { playTone(420, 0.06, { channel: "ui", type: "triangle", volume: 0.025 }); playTone(560, 0.07, { channel: "ui", delay: 0.04, volume: 0.02 }); },
+    draw: () => { playTone(260, 0.09, { channel: "ui", type: "triangle", endFrequency: 420 }); playTone(520, 0.08, { channel: "ui", delay: 0.07, volume: 0.03 }); },
+    shuffle: () => [0, .045, .09, .135].forEach((delay, index) => playTone(180 + index * 35, .04, { channel: "ui", delay, type: "triangle", volume: .018 })),
+    action: () => { playTone(330, 0.1, { type: "square", volume: 0.025 }); playTone(494, 0.13, { delay: 0.08 }); },
+    shield: () => { playTone(360, .15, { type: "sine", endFrequency: 620 }); playTone(720, .18, { delay: .08, volume: .03 }); },
+    freeze: () => [880, 740, 620].forEach((tone, index) => playTone(tone, .13, { delay: index * .06, type: "sine", volume: .026 })),
+    steal: () => { playTone(240, .08, { type: "triangle" }); playTone(520, .1, { delay: .08, type: "triangle" }); },
+    damage: () => { playTone(125, .16, { type: "sawtooth", endFrequency: 82, volume: .04 }); },
+    correct: () => [392, 494, 659].forEach((tone, index) => playTone(tone, 0.16, { delay: index * 0.07 })),
+    wrong: () => { playTone(220, 0.18, { type: "sawtooth", endFrequency: 145, volume: 0.035 }); },
+    timeout: () => { playTone(180, 0.16, { type: "square", volume: 0.03 }); playTone(145, 0.2, { delay: 0.16, type: "square", volume: 0.03 }); },
+    dice: () => { playTone(150, 0.07, { type: "triangle", endFrequency: 240 }); playTone(190, 0.07, { delay: 0.1, type: "triangle" }); },
+    turn: () => { playTone(440, 0.1, { volume: 0.03 }); playTone(587, 0.12, { delay: 0.08, volume: 0.03 }); },
+    win: () => [392, 494, 587, 784].forEach((tone, index) => playTone(tone, .22, { delay: index * .1, volume: .04 })),
+  };
+
+  sounds[name]?.();
+}
+
+function playMusicNote(frequency, duration, delay = 0, volume = 0.018) {
+  playTone(frequency, duration, {
+    channel: "music",
+    delay,
+    type: "sine",
+    volume,
+  });
+  playTone(frequency / 2, duration * 1.05, {
+    channel: "music",
+    delay,
+    type: "triangle",
+    volume: volume * 0.32,
+  });
+}
+
+function scheduleMusicPhrase() {
+  if (!audioContext || audioSettings.muted || audioSettings.music <= 0) {
+    return;
+  }
+
+  const menuChords = [
+    [196, 246.94, 293.66],
+    [174.61, 220, 261.63],
+    [146.83, 196, 246.94],
+    [164.81, 207.65, 246.94],
+  ];
+  const matchChords = [
+    [146.83, 174.61, 220],
+    [130.81, 164.81, 196],
+    [123.47, 146.83, 196],
+    [138.59, 174.61, 207.65],
+  ];
+  const chords = musicMode === "match" ? matchChords : menuChords;
+  const chord = chords[musicStep % chords.length];
+  const beat = musicMode === "match" ? 0.52 : 0.72;
+
+  chord.forEach((tone, index) => playMusicNote(tone, beat * 3.4, index * 0.035, musicMode === "match" ? 0.013 : 0.011));
+  playMusicNote(chord[2] * 2, beat * 0.72, beat * 1.4, 0.008);
+  musicStep += 1;
+}
+
+function startBackgroundMusic(mode = document.body.classList.contains("is-match") ? "match" : "menu") {
+  musicMode = mode;
+  getAudioContext();
+
+  if (musicTimer) {
+    window.clearInterval(musicTimer);
+  }
+
+  musicStep = 0;
+  scheduleMusicPhrase();
+  musicTimer = window.setInterval(scheduleMusicPhrase, mode === "match" ? 2100 : 2900);
+}
+
+function syncBackgroundMusic() {
+  const nextMode = document.body.classList.contains("is-match") ? "match" : "menu";
+  if (!musicTimer || nextMode !== musicMode) startBackgroundMusic(nextMode);
+}
+
+function saveAudioSettings() {
+  localStorage.setItem("league-audio-settings", JSON.stringify(audioSettings));
+}
+
+function renderAudioSettings() {
+  Object.entries(volumeInputs).forEach(([name, input]) => {
+    const percentage = Math.round(audioSettings[name] * 100);
+    input.value = percentage;
+    document.querySelector(`#${name}-volume-value`).textContent = `${percentage}%`;
+  });
+  muteButton.textContent = audioSettings.muted ? "Sound muted" : "Mute all";
+  muteButton.setAttribute("aria-pressed", String(audioSettings.muted));
+  settingsModal.classList.toggle("is-muted", audioSettings.muted);
+}
+
+function unlockAudio() {
+  getAudioContext();
+  syncBackgroundMusic();
+}
+
+function isLocalHumanPlayer(player) {
+  return Boolean(player && !isNpcPlayer(player) && (lobbyMode === "npc" ? player.id === 1 : true));
+}
 
 function shuffle(items) {
   const shuffled = [...items];
@@ -282,8 +468,14 @@ function getAlivePlayers() {
 
 function getTargetPlayer() {
   const activePlayer = getActivePlayer();
-  const aliveOpponents = getAlivePlayers().filter((player) => player.id !== activePlayer.id);
-  return aliveOpponents[0] || null;
+  const alivePlayers = getAlivePlayers();
+  const activeIndex = alivePlayers.findIndex((player) => player.id === activePlayer?.id);
+
+  if (activeIndex < 0 || alivePlayers.length < 2) {
+    return null;
+  }
+
+  return alivePlayers[(activeIndex + 1) % alivePlayers.length];
 }
 
 function getPlayerStatus(player) {
@@ -315,17 +507,17 @@ function getPlayerInitials(name) {
 }
 
 function renderPlayerVitals(player) {
-  const healthPercent = Math.max(0, Math.min(100, (player.health / 8) * 100));
-  const cpPercent = Math.max(0, Math.min(100, (player.calculusPoints / 15) * 100));
+  const healthPercent = Math.max(0, Math.min(100, (player.health / MAX_HEALTH) * 100));
+  const cpPercent = Math.max(0, Math.min(100, (player.calculusPoints / CP_TO_WIN) * 100));
 
   return `
     <div class="vitals" aria-label="${player.health} health and ${player.calculusPoints} calculus points">
       <div class="vital-row health-vital">
-        <span><b>HP</b><em>${player.health}/8</em></span>
+        <span><b>HP</b><em>${player.health}/${MAX_HEALTH}</em></span>
         <div class="vital-track"><i style="width: ${healthPercent}%"></i></div>
       </div>
       <div class="vital-row cp-vital">
-        <span><b>CP</b><em>${player.calculusPoints}/15</em></span>
+        <span><b>CP</b><em>${player.calculusPoints}/${CP_TO_WIN}</em></span>
         <div class="vital-track"><i style="width: ${cpPercent}%"></i></div>
       </div>
     </div>
@@ -377,31 +569,24 @@ function startRollCountdown() {
 }
 
 function createDeck() {
-  const cards = [];
-  let questionIndex = 0;
+  const cards = Array.from({ length: 10 }, (_, index) => ({
+    id: `question-${index + 1}`,
+    type: "question",
+    title: "Question",
+    image: imagePaths.questionBack,
+  }));
 
   actionTypes.forEach((action) => {
-    difficultyTiers.forEach((tier) => {
-      for (let copy = 1; copy <= 2; copy += 1) {
-        const questionsInTier = questionBank.filter((question) => question.tier === tier.name);
-        const question = questionsInTier[questionIndex % questionsInTier.length];
-        questionIndex += 1;
-
-        cards.push({
-          id: `${action.id}-${tier.name.toLowerCase()}-${copy}`,
-          type: "action-question",
-          actionId: action.id,
-          actionTitle: action.title,
-          concept: action.concept,
-          description: action.description,
-          image: action.image,
-          difficulty: tier.name,
-          prompt: question.prompt,
-          answer: question.answer,
-          method: question.method,
-        });
-      }
-    });
+    for (let copy = 1; copy <= 3; copy += 1) {
+      cards.push({
+        id: `${action.id}-${copy}`,
+        type: "action",
+        actionId: action.id,
+        title: action.title,
+        description: action.description,
+        image: action.image,
+      });
+    }
   });
 
   return shuffle(cards);
@@ -411,7 +596,7 @@ function createPlayers(names) {
   return names.map((name, index) => ({
     id: index + 1,
     name,
-    health: 8,
+    health: MAX_HEALTH,
     calculusPoints: 0,
     hand: [],
     dice: null,
@@ -419,7 +604,9 @@ function createPlayers(names) {
     shield: false,
     doubleDamage: false,
     frozen: false,
+    doubleDamagePending: false,
     isEliminated: false,
+    turnsTaken: 0,
   }));
 }
 
@@ -429,6 +616,7 @@ function getJoinedLobbyPlayers() {
 
 function resetGame(playerNames = getJoinedLobbyPlayers()) {
   clearNpcTimeout();
+  clearTurnAdvanceTimeout();
   clearRollCountdown();
   players = createPlayers(playerNames);
   deck = createDeck();
@@ -443,6 +631,15 @@ function resetGame(playerNames = getJoinedLobbyPlayers()) {
   turnState.isStarted = false;
   turnState.rollingPlayerIndex = 0;
   turnState.isRolling = false;
+  turnState.isMatchOver = false;
+  turnState.hasDrawn = false;
+  turnState.isResolving = false;
+  usedQuestionPrompts = new Set();
+  players.forEach((player) => {
+    for (let count = 0; count < 3; count += 1) {
+      player.hand.push(deck.pop());
+    }
+  });
   setFeedback("Roll the dice", "Lowest roll goes first.");
   renderAll();
   startRollCountdown();
@@ -463,6 +660,7 @@ function finishRollOrder() {
   setFeedback("Turn order set.", `${getActivePlayer().name} rolled lowest and goes first.`);
   showToast(`${getActivePlayer().name} goes first.`, "info");
   renderAll();
+  startDrawTimer();
   scheduleNpcTurn();
 }
 
@@ -480,14 +678,28 @@ function rollTurnOrder() {
   }
 
   turnState.isRolling = true;
-  const firstDie = rollDie();
-  const secondDie = rollDie();
-  rollingPlayer.diceValues = [firstDie, secondDie];
-  rollingPlayer.dice = firstDie + secondDie;
-  setFeedback(`${rollingPlayer.name} rolled ${rollingPlayer.dice}.`, "Lowest roll goes first.");
+  playSound("dice");
+  rollingPlayer.dice = null;
+  rollingPlayer.diceValues = [rollDie(), rollDie()];
+  setFeedback(`${rollingPlayer.name} is rolling...`, "Lowest roll goes first.");
   renderAll();
 
+  rollAnimationTimer = window.setInterval(() => {
+    rollingPlayer.diceValues = [rollDie(), rollDie()];
+    updateRollingDice(rollingPlayer.diceValues);
+  }, 115);
+
   window.setTimeout(() => {
+    window.clearInterval(rollAnimationTimer);
+    rollAnimationTimer = null;
+    const firstDie = rollDie();
+    const secondDie = rollDie();
+    rollingPlayer.diceValues = [firstDie, secondDie];
+    rollingPlayer.dice = firstDie + secondDie;
+    setFeedback(`${rollingPlayer.name} rolled ${rollingPlayer.dice}.`, "Lowest roll goes first.");
+    renderAll();
+
+    window.setTimeout(() => {
     turnState.rollingPlayerIndex += 1;
     turnState.isRolling = false;
 
@@ -505,65 +717,124 @@ function rollTurnOrder() {
     } else {
       startRollCountdown();
     }
-  }, 2200);
+    }, 1800);
+  }, 1650);
 }
 
 function drawCard() {
-  if (!turnState.isStarted || currentCard) {
+  if (!turnState.isStarted || turnState.isMatchOver || turnState.isResolving || turnState.hasDrawn || currentCard) {
     return;
   }
 
   const activePlayer = getActivePlayer();
+  stopTimer();
 
   if (!activePlayer || activePlayer.isEliminated) {
     nextTurn();
     return;
   }
 
-  if (activePlayer.frozen) {
-    activePlayer.frozen = false;
-    feedbackElement.textContent = `${activePlayer.name} is frozen and skips this turn.`;
-    nextTurn();
-    return;
-  }
-
   if (deck.length === 0) {
+    if (discardPile.length === 0) {
+      setFeedback("Deck is empty", "Play a card from your hand to continue.");
+      showToast("No cards left to draw. Play from your hand.", "info");
+      return;
+    }
     deck = shuffle(discardPile);
     discardPile = [];
+    playSound("shuffle");
   }
 
   const card = deck.pop();
+  turnState.isResolving = true;
   activePlayer.hand.push(card);
-  selectedHandIndex = activePlayer.hand.length - 1;
-  currentCard = card;
+  turnState.hasDrawn = true;
   document.body.classList.add("card-drawn");
   window.setTimeout(() => document.body.classList.remove("card-drawn"), 500);
-  startTimer(getTierByName(card.difficulty).timeLimit);
-  feedbackElement.textContent = `${activePlayer.name} drew ${card.actionTitle} ${card.difficulty}.`;
-  showToast(`${card.difficulty} problem: ${getTierByName(card.difficulty).calculusPoints} CP / ${getTierByName(card.difficulty).damage} DMG`, "info");
+  feedbackElement.textContent = `${activePlayer.name} drew a ${card.type} card. Choose a card from your hand.`;
+  if (isLocalHumanPlayer(activePlayer)) {
+    showToast(`${card.type === "question" ? "Question card" : card.title} added to your hand.`, "private");
+    playSound("draw");
+  }
   renderAll();
+  scheduleAutoAdvance();
 }
 
 function playSelectedCard(index) {
   const activePlayer = getActivePlayer();
 
-  if (!activePlayer || !activePlayer.hand[index]) {
+  if (turnState.isResolving || !activePlayer || !activePlayer.hand[index] || currentCard || activePlayer.turnsTaken === 0 || turnState.hasDrawn) {
     return;
   }
 
   selectedHandIndex = index;
   currentCard = activePlayer.hand[index];
-  startTimer(getTierByName(currentCard.difficulty).timeLimit);
-  feedbackElement.textContent = `${activePlayer.name} is solving: ${currentCard.prompt}`;
+  stopTimer();
+  feedbackElement.textContent = currentCard.type === "question"
+    ? "Choose a difficulty for this question."
+    : `Choose a target for ${currentCard.title}.`;
+  renderAll();
+  startTimer(CHOICE_TIME_LIMIT, "choose");
+}
+
+function chooseQuestionDifficulty(tierName) {
+  if (!currentCard || currentCard.type !== "question") {
+    return;
+  }
+
+  let availableQuestions = questionBank.filter((question) => question.tier === tierName && !usedQuestionPrompts.has(question.prompt));
+
+  if (availableQuestions.length === 0) {
+    questionBank.filter((question) => question.tier === tierName).forEach((question) => usedQuestionPrompts.delete(question.prompt));
+    availableQuestions = questionBank.filter((question) => question.tier === tierName);
+  }
+  const question = availableQuestions[Math.floor(Math.random() * availableQuestions.length)];
+  usedQuestionPrompts.add(question.prompt);
+  Object.assign(currentCard, question, { difficulty: tierName, isRevealed: true });
+  startTimer(getTierByName(tierName).timeLimit, "answer");
+  setFeedback(`${tierName} question`, "Solve it before the timer ends.");
   renderAll();
 }
 
+function playActionCard(targetId) {
+  if (turnState.isResolving || !currentCard || currentCard.type !== "action") {
+    return;
+  }
+
+  const activePlayer = getActivePlayer();
+  turnState.isResolving = true;
+  const target = players.find((player) => player.id === targetId) || activePlayer;
+  const card = removeCurrentCardFromHand();
+  const expiringDoubleDamage = activePlayer.doubleDamage;
+
+  if (card.actionId === "shield") {
+    activePlayer.shield = true;
+  } else if (card.actionId === "double-damage") {
+    activePlayer.doubleDamagePending = true;
+  } else if (card.actionId === "freeze" && target.id !== activePlayer.id) {
+    target.frozen = true;
+  } else if (card.actionId === "steal" && target.id !== activePlayer.id && target.hand.length > 0) {
+    const stolenIndex = Math.floor(Math.random() * target.hand.length);
+    activePlayer.hand.push(target.hand.splice(stolenIndex, 1)[0]);
+  }
+
+  discardUsedCard(card);
+  activePlayer.doubleDamage = false;
+  playSound(card.actionId === "double-damage" ? "action" : card.actionId);
+  showToast(`${activePlayer.name} played ${card.title}.`, "good");
+  setFeedback(`${activePlayer.name} played ${card.title}.`, `${expiringDoubleDamage ? "Their Double Damage effect expired. " : ""}The card was shuffled back into the deck.`);
+  renderAll();
+  scheduleAutoAdvance();
+}
+
 function returnCardToDeck(card) {
-  deck = shuffle([card, ...deck]);
+  discardUsedCard(card);
 }
 
 function discardUsedCard(card) {
-  discardPile.push(card);
+  discardPile.push(card.type === "question"
+    ? { id: card.id, type: "question", title: "Question", image: imagePaths.questionBack }
+    : card);
 }
 
 function removeCurrentCardFromHand() {
@@ -579,29 +850,6 @@ function removeCurrentCardFromHand() {
   return card;
 }
 
-function applyActionEffect(player, target, card) {
-  if (!target) {
-    return;
-  }
-
-  if (card.actionId === "shield") {
-    player.shield = true;
-  }
-
-  if (card.actionId === "double-damage") {
-    player.doubleDamage = true;
-  }
-
-  if (card.actionId === "freeze") {
-    target.frozen = true;
-  }
-
-  if (card.actionId === "steal" && target.calculusPoints > 0) {
-    target.calculusPoints -= 1;
-    player.calculusPoints += 1;
-  }
-}
-
 function damagePlayer(target, amount) {
   if (!target) {
     return 0;
@@ -609,6 +857,7 @@ function damagePlayer(target, amount) {
 
   if (target.shield) {
     target.shield = false;
+    playSound("shield");
     return 0;
   }
 
@@ -623,10 +872,11 @@ function damagePlayer(target, amount) {
 }
 
 function answerCorrect() {
-  if (!currentCard) {
+  if (turnState.isResolving || !currentCard) {
     return;
   }
 
+  turnState.isResolving = true;
   stopTimer();
   const activePlayer = getActivePlayer();
   const target = getTargetPlayer();
@@ -636,10 +886,11 @@ function answerCorrect() {
   activePlayer.doubleDamage = false;
   activePlayer.calculusPoints += tier.calculusPoints;
   const damageDealt = damagePlayer(target, damage);
-  applyActionEffect(activePlayer, target, card);
   discardUsedCard(card);
-  feedbackElement.textContent = `${feedbackMessages.correct} ${feedbackMessages.gained} ${feedbackMessages.damage} (+${tier.calculusPoints} CP, ${damageDealt} damage)`;
-  showToast(`${feedbackMessages.correct} +${tier.calculusPoints} CP, ${damageDealt} damage dealt.`, "good");
+  feedbackElement.textContent = `${activePlayer.name} answered correctly and earned ${tier.calculusPoints} CP.`;
+  showToast(`${activePlayer.name} answered correctly: +${tier.calculusPoints} CP and ${damageDealt} damage.`, "good");
+  playSound("correct");
+  if (damageDealt > 0) window.setTimeout(() => playSound("damage"), 260);
   checkWinConditions();
   renderAll();
   scheduleAutoAdvance();
@@ -656,7 +907,7 @@ function normalizeAnswer(answer) {
 function submitAnswer(event) {
   event.preventDefault();
 
-  if (!currentCard) {
+  if (turnState.isResolving || !currentCard) {
     return;
   }
 
@@ -673,35 +924,41 @@ function submitAnswer(event) {
 }
 
 function answerWrong() {
-  if (!currentCard) {
+  if (turnState.isResolving || !currentCard) {
     return;
   }
 
+  turnState.isResolving = true;
   stopTimer();
   const activePlayer = getActivePlayer();
   const card = removeCurrentCardFromHand();
   const tier = getTierByName(card.difficulty);
+  activePlayer.doubleDamage = false;
   activePlayer.health = Math.max(0, activePlayer.health - tier.wrongPenalty);
-  returnCardToDeck(card);
+  discardUsedCard(card);
   feedbackElement.textContent = `${feedbackMessages.wrong} ${activePlayer.name} lost ${tier.wrongPenalty} HP.`;
   showToast(`${feedbackMessages.wrong} -${tier.wrongPenalty} HP.`, "bad");
+  playSound("wrong");
   checkWinConditions();
   renderAll();
   scheduleAutoAdvance();
 }
 
 function timerOut() {
-  if (!currentCard) {
+  if (turnState.isResolving || !currentCard) {
     return;
   }
 
+  turnState.isResolving = true;
   stopTimer();
   const activePlayer = getActivePlayer();
   const card = removeCurrentCardFromHand();
+  activePlayer.doubleDamage = false;
   activePlayer.health = Math.max(0, activePlayer.health - 1);
-  returnCardToDeck(card);
+  discardUsedCard(card);
   feedbackElement.textContent = `Time is up. ${activePlayer.name} lost 1 HP.`;
   showToast("Timer ran out. -1 HP.", "bad");
+  playSound("timeout");
   checkWinConditions();
   renderAll();
   scheduleAutoAdvance();
@@ -720,27 +977,36 @@ function checkWinConditions() {
     }
   });
 
-  const cpWinner = players.find((player) => !player.isEliminated && player.calculusPoints >= 15);
+  const cpWinner = players.find((player) => !player.isEliminated && player.calculusPoints >= CP_TO_WIN);
   const alivePlayers = getAlivePlayers();
 
   if (cpWinner) {
-    feedbackElement.textContent = `${cpWinner.name} reached 15 CP and wins a placement.`;
-    showToast(`${cpWinner.name} reached 15 CP.`, "good");
+    turnState.isMatchOver = true;
+    stopTimer();
+    feedbackElement.textContent = `${cpWinner.name} reached ${CP_TO_WIN} CP and wins the match.`;
+    showToast(`${cpWinner.name} reached ${CP_TO_WIN} CP.`, "good");
+    playSound("win");
   }
 
   if (alivePlayers.length === 1) {
+    turnState.isMatchOver = true;
+    stopTimer();
     feedbackElement.textContent = `${alivePlayers[0].name} wins as the last player remaining.`;
     showToast(`${alivePlayers[0].name} wins the match.`, "good");
+    playSound("win");
   }
 }
 
 function nextTurn() {
-  if (!turnState.isStarted) {
+  if (!turnState.isStarted || turnState.isMatchOver) {
     return;
   }
 
   clearNpcTimeout();
+  clearTurnAdvanceTimeout();
   stopTimer();
+  const previousPlayer = getActivePlayer();
+  if (previousPlayer) previousPlayer.turnsTaken += 1;
   currentCard = null;
   selectedHandIndex = -1;
 
@@ -755,24 +1021,126 @@ function nextTurn() {
 
   turnState.orderIndex = (turnState.orderIndex + 1) % turnState.orderedPlayerIds.length;
   turnState.turnNumber += 1;
+  turnState.hasDrawn = false;
+  turnState.isResolving = false;
+  const nextPlayer = getActivePlayer();
+  nextPlayer.shield = false;
+  nextPlayer.doubleDamage = nextPlayer.doubleDamagePending;
+  nextPlayer.doubleDamagePending = false;
+
+  if (nextPlayer.frozen) {
+    nextPlayer.frozen = false;
+    nextPlayer.doubleDamage = false;
+    setFeedback(`${nextPlayer.name} is frozen`, "Their turn is skipped.");
+    showToast(`${nextPlayer.name} misses this turn.`, "info");
+    renderAll();
+    npcTimeout = window.setTimeout(nextTurn, 1300);
+    return;
+  }
   feedbackElement.textContent = `${getActivePlayer().name}'s turn. Draw a card.`;
   renderAll();
+  if (isLocalHumanPlayer(getActivePlayer())) {
+    playSound("turn");
+  }
+  startDrawTimer();
   scheduleNpcTurn();
 }
 
-function startTimer(seconds) {
+function startDrawTimer() {
+  if (!turnState.isStarted || turnState.isMatchOver || currentCard || !getActivePlayer()) {
+    return;
+  }
+
+  const activePlayer = getActivePlayer();
+  const instruction = activePlayer.turnsTaken === 0
+    ? `First turn: draw a card within ${DRAW_TIME_LIMIT} seconds.`
+    : `Draw from the deck or play a card within ${DRAW_TIME_LIMIT} seconds.`;
+  setFeedback(`${activePlayer.name}'s turn`, instruction);
+  startTimer(DRAW_TIME_LIMIT, "draw");
+}
+
+function drawTimerOut() {
+  const activePlayer = getActivePlayer();
+
+  if (!activePlayer || currentCard) {
+    return;
+  }
+
+  turnState.isResolving = true;
   stopTimer();
+  activePlayer.health = Math.max(0, activePlayer.health - 1);
+  showToast(`${activePlayer.name} waited too long. -1 HP.`, "bad");
+  playSound("timeout");
+  setFeedback("Turn missed", `${activePlayer.name} lost 1 HP for not drawing.`);
+  checkWinConditions();
+  renderAll();
+  scheduleAutoAdvance();
+}
+
+function playTimerOut() {
+  const activePlayer = getActivePlayer();
+
+  if (!activePlayer || currentCard || !turnState.hasDrawn) {
+    return;
+  }
+
+  turnState.isResolving = true;
+  stopTimer();
+  activePlayer.health = Math.max(0, activePlayer.health - 0.5);
+  setFeedback("Decision timed out", `${activePlayer.name} lost 0.5 HP for not playing a card.`);
+  showToast("No card played. -0.5 HP.", "bad");
+  playSound("timeout");
+  checkWinConditions();
+  renderAll();
+  scheduleAutoAdvance();
+}
+
+function choiceTimerOut() {
+  const activePlayer = getActivePlayer();
+
+  if (!activePlayer || !currentCard || currentCard.isRevealed) {
+    return;
+  }
+
+  turnState.isResolving = true;
+  stopTimer();
+  currentCard = null;
+  selectedHandIndex = -1;
+  activePlayer.doubleDamage = false;
+  activePlayer.health = Math.max(0, activePlayer.health - 0.5);
+  setFeedback("Choice timed out", `${activePlayer.name} kept the card but lost 0.5 HP.`);
+  showToast("No choice made. -0.5 HP.", "bad");
+  playSound("timeout");
+  checkWinConditions();
+  renderAll();
+  scheduleAutoAdvance();
+}
+
+function startTimer(seconds, mode = "answer") {
+  stopTimer();
+  timerMode = mode;
+  const timerLabels = { draw: "Draw", play: "Play", choose: "Choose", answer: "Solve" };
+  const timerLabel = timerLabels[mode] || "Time";
   let remaining = seconds;
-  timerDisplayElement.textContent = `${remaining}s`;
+  timerDisplayElement.textContent = `${timerLabel} ${remaining}s`;
+  timerDisplayElement.dataset.phase = mode;
   timerDisplayElement.classList.remove("is-urgent");
 
   timer = window.setInterval(() => {
     remaining -= 1;
-    timerDisplayElement.textContent = `${remaining}s`;
+    timerDisplayElement.textContent = `${timerLabel} ${remaining}s`;
     timerDisplayElement.classList.toggle("is-urgent", remaining <= 5);
 
     if (remaining <= 0) {
-      timerOut();
+      if (timerMode === "draw") {
+        drawTimerOut();
+      } else if (timerMode === "play") {
+        playTimerOut();
+      } else if (timerMode === "choose") {
+        choiceTimerOut();
+      } else {
+        timerOut();
+      }
     }
   }, 1000);
 }
@@ -784,13 +1152,22 @@ function stopTimer() {
   }
 
   timerDisplayElement.textContent = "--";
+  delete timerDisplayElement.dataset.phase;
   timerDisplayElement.classList.remove("is-urgent");
+  timerMode = null;
 }
 
 function clearNpcTimeout() {
   if (npcTimeout) {
     window.clearTimeout(npcTimeout);
     npcTimeout = null;
+  }
+}
+
+function clearTurnAdvanceTimeout() {
+  if (turnAdvanceTimeout) {
+    window.clearTimeout(turnAdvanceTimeout);
+    turnAdvanceTimeout = null;
   }
 }
 
@@ -806,40 +1183,66 @@ function scheduleNpcTurn() {
     return;
   }
 
+  setFeedback(`${activePlayer.name}'s turn`, "They are considering their options...");
+
   npcTimeout = window.setTimeout(() => {
-    feedbackElement.textContent = `${activePlayer.name} is thinking...`;
-    showToast(`${activePlayer.name} is thinking...`, "info");
-    drawCard();
+    setFeedback(`${activePlayer.name} is choosing`, "Draw a new card or play from their hand?");
+    const canDraw = deck.length > 0 || discardPile.length > 0;
+    const shouldDraw = canDraw && (activePlayer.turnsTaken === 0 || activePlayer.hand.length < 2 || Math.random() < 0.34);
+
+    if (shouldDraw) {
+      npcTimeout = window.setTimeout(() => drawCard(), 1100);
+      return;
+    }
+
+    const cardIndex = Math.floor(Math.random() * activePlayer.hand.length);
+    const chosenCard = activePlayer.hand[cardIndex];
+    setFeedback(`${activePlayer.name} chose a card`, chosenCard.type === "question" ? "Preparing a question..." : `Preparing ${chosenCard.title}...`);
 
     npcTimeout = window.setTimeout(() => {
       const currentActivePlayer = getActivePlayer();
 
-      if (!currentActivePlayer || currentActivePlayer.id !== activePlayer.id || !isNpcPlayer(currentActivePlayer) || !currentCard) {
+      if (!currentActivePlayer || currentActivePlayer.id !== activePlayer.id || !isNpcPlayer(currentActivePlayer) || currentCard) {
         return;
       }
 
-      feedbackElement.textContent = `${currentActivePlayer.name} is solving the problem...`;
-      const accuracy = npcAccuracyByTier[currentCard.difficulty] ?? 0.6;
-      const shouldAnswerCorrectly = Math.random() < accuracy;
+      playSelectedCard(cardIndex);
 
-      if (shouldAnswerCorrectly) {
-        answerCorrect();
-      } else {
-        answerWrong();
+      if (currentCard.type === "action") {
+        const target = getTargetPlayer();
+        const targetId = currentCard.actionId === "shield" || currentCard.actionId === "double-damage" ? currentActivePlayer.id : target.id;
+        const targetName = targetId === currentActivePlayer.id ? "themselves" : target.name;
+        setFeedback(`${currentActivePlayer.name} is using ${currentCard.title}`, `Target: ${targetName}`);
+        npcTimeout = window.setTimeout(() => playActionCard(targetId), 1400);
+        return;
       }
-    }, 3000);
-  }, 1800);
+
+      const tierName = Math.random() < 0.5 ? "Easy" : Math.random() < 0.75 ? "Medium" : "Hard";
+      setFeedback(`${currentActivePlayer.name} chose ${tierName}`, "The question is being revealed...");
+      npcTimeout = window.setTimeout(() => {
+        chooseQuestionDifficulty(tierName);
+        setFeedback(`${currentActivePlayer.name} is solving`, "Waiting for their answer...");
+        npcTimeout = window.setTimeout(() => {
+        const accuracy = npcAccuracyByTier[tierName] ?? 0.6;
+        if (Math.random() < accuracy) answerCorrect(); else answerWrong();
+        }, 2800);
+      }, 1200);
+    }, 1500);
+  }, 1700);
 }
 
 function scheduleAutoAdvance() {
-  clearNpcTimeout();
+  clearTurnAdvanceTimeout();
   const activePlayer = getActivePlayer();
 
-  if (!turnState.isStarted || !activePlayer || currentCard || getAlivePlayers().length <= 1) {
+  if (!turnState.isStarted || turnState.isMatchOver || !activePlayer || currentCard || getAlivePlayers().length <= 1) {
     return;
   }
 
-  npcTimeout = window.setTimeout(nextTurn, 1800);
+  turnAdvanceTimeout = window.setTimeout(() => {
+    turnAdvanceTimeout = null;
+    nextTurn();
+  }, isNpcPlayer(activePlayer) ? 2300 : 1700);
 }
 
 function renderDifficultyTiers() {
@@ -871,7 +1274,8 @@ function renderTurnSystem() {
   timerDisplayElement.textContent = turnState.isStarted
     ? timerDisplayElement.textContent
     : lobbyMode === "friends" ? `Lowest roll goes first | ${rollCountdown}s` : "Lowest roll goes first";
-  drawCardButton.disabled = !turnState.isStarted || Boolean(currentCard) || isNpcTurn;
+  const canDraw = deck.length > 0 || discardPile.length > 0;
+  drawCardButton.disabled = !turnState.isStarted || turnState.isMatchOver || turnState.isResolving || turnState.hasDrawn || Boolean(currentCard) || isNpcTurn || !canDraw;
   deckStackButton.disabled = drawCardButton.disabled;
   deckStackButton.classList.toggle("is-ready", !deckStackButton.disabled);
   rollOrderButton.hidden = turnState.isStarted || turnState.isRolling || (lobbyMode === "npc" && isNpcPlayer(rollingPlayer));
@@ -911,11 +1315,24 @@ function renderConcepts() {
 function renderDeckCounts() {
   deckCountElement.textContent = deck.length;
   discardCountElement.textContent = discardPile.length;
+  const visibleCards = discardPile.slice(-5);
+  playedCardPileElement.innerHTML = visibleCards.length
+    ? visibleCards.map((card, index) => `<img style="--pile-x:${(index - 2) * 1.5}px;--pile-y:${(index - 2) * -1}px;--pile-rotation:${(index - 2) * 1.2}deg" src="${card.image}" alt="${index === visibleCards.length - 1 ? `${card.title || "Question"} card on top of the played pile` : "Played card"}">`).join("")
+    : `<span class="pile-empty">Empty</span>`;
 }
+
 
 function renderDie(value) {
   const dots = Array.from({ length: value }, (_, index) => `<span class="pip pip-${index + 1}"></span>`).join("");
   return `<span class="die face-${value}" aria-label="${value}">${dots}</span>`;
+}
+
+function updateRollingDice(values) {
+  const diceRow = diceRollPanelElement.querySelector(".dice-row");
+
+  if (diceRow) {
+    diceRow.innerHTML = values.map(renderDie).join("");
+  }
 }
 
 function renderDiceRollPanel() {
@@ -930,15 +1347,17 @@ function renderDiceRollPanel() {
 
   diceRollPanelElement.innerHTML = visiblePlayer
     ? `
-      <div class="dice-center">
+      <div class="dice-center${turnState.isRolling ? " is-rolling" : ""}">
+        <div class="dice-phase-label">Turn order</div>
         <div class="dice-title">${visiblePlayer.name}</div>
+        <p class="dice-instruction">${visiblePlayer.dice ? "Roll complete" : turnState.isRolling ? "Rolling the dice..." : "Lowest total takes the first turn"}</p>
         <div class="dice-row">
           ${(visiblePlayer.diceValues.length === 2 ? visiblePlayer.diceValues : [1, 1]).map(renderDie).join("")}
         </div>
-        <strong>${visiblePlayer.dice ? `${visiblePlayer.name} rolled ${visiblePlayer.dice}` : "Ready to roll"}</strong>
+        <strong>${visiblePlayer.dice ? `<span class="roll-total">${visiblePlayer.dice}</span><span>Total rolled</span>` : turnState.isRolling ? "Let them roll..." : "Ready when you are"}</strong>
       </div>
       <div class="roll-results">
-        ${rolledPlayers.map((player) => `<p>${player.name}: <strong>${player.dice}</strong></p>`).join("")}
+        ${rolledPlayers.map((player, index) => `<p><span>${index + 1}</span>${player.name}<strong>${player.dice}</strong></p>`).join("")}
       </div>
     `
     : "";
@@ -947,7 +1366,7 @@ function renderDiceRollPanel() {
 function renderLobby() {
   lobbySlotsElement.innerHTML = lobbyPlayers
     .map((playerName, index) => `
-      <article class="lobby-slot${playerName ? " is-filled" : ""}">
+      <article class="lobby-slot${playerName ? " is-filled" : ""}" style="--slot-index:${index}">
         <span>Seat ${index + 1}</span>
         <strong>${playerName || "Empty"}</strong>
       </article>
@@ -1066,11 +1485,9 @@ async function selectFriendsMode() {
   await connectToRoom(createRoomCode(), true);
 }
 
-function renderCardBacks(count, imagePath) {
-  const visibleCount = Math.min(count, 5);
-
-  return Array.from({ length: visibleCount }, (_, index) => `
-    <img style="--card-index: ${index}" src="${imagePath}" alt="Card back">
+function renderCardBacks(cards) {
+  return cards.map((card, index) => `
+    <img style="--card-index:${index};--deal-delay:${index * 55}ms" src="${card.type === "question" ? imagePaths.questionBack : imagePaths.actionBack}" alt="Hidden card back">
   `).join("");
 }
 
@@ -1089,20 +1506,20 @@ function renderTable() {
   const handCards = bottomPlayer
     ? bottomPlayer.hand
       .map((card, index) => `
-        <button class="hand-card${activePlayer && bottomPlayer.id === activePlayer.id && index === selectedHandIndex ? " is-selected" : ""}" type="button" data-hand-index="${index}" ${activePlayer && bottomPlayer.id === activePlayer.id ? "" : "disabled"}>
-          <img src="${card.image}" alt="${card.actionTitle} card">
-          <span>${card.actionTitle} ${card.difficulty}</span>
+        <button class="hand-card ${card.type}${index >= 6 ? " is-overflow" : ""}${activePlayer && bottomPlayer.id === activePlayer.id && index === selectedHandIndex ? " is-selected" : ""}" style="--hand-index:${index};--overflow-index:${Math.max(0, index - 6)};--deal-delay:${index * 55}ms" type="button" data-hand-index="${index}" ${activePlayer && bottomPlayer.id === activePlayer.id && activePlayer.turnsTaken > 0 && !turnState.hasDrawn && !turnState.isResolving && !currentCard ? "" : "disabled"}>
+          <img src="${card.image}" alt="${card.title || "Question"} card">
+          <span>${card.title || "Question"}</span>
         </button>
       `)
       .join("")
     : "";
-  const canAnswerCurrentCard = Boolean(currentCard && activePlayer && bottomPlayer && activePlayer.id === bottomPlayer.id && !isNpcPlayer(activePlayer));
+  const canAnswerCurrentCard = Boolean(currentCard?.isRevealed && activePlayer && bottomPlayer && activePlayer.id === bottomPlayer.id && !isNpcPlayer(activePlayer));
   const answerForm = canAnswerCurrentCard
     ? `
       <form class="answer-form">
         <label for="answer-input">Your answer</label>
         <input id="answer-input" name="answer" type="text" autocomplete="off" placeholder="Type the answer..." required>
-        <button type="submit">Submit answer</button>
+        <button type="submit" ${turnState.isResolving ? "disabled" : ""}>Submit answer</button>
       </form>
     `
     : "";
@@ -1113,38 +1530,55 @@ function renderTable() {
         <header class="active-player-header">
           <div class="player-avatar" aria-hidden="true">${getPlayerInitials(bottomPlayer.name)}</div>
           <div class="active-player-identity">
-            <span>You are playing as</span>
+            <span>You are playing<br>as</span>
             <p>${bottomPlayer.name}</p>
           </div>
           <span class="turn-pill">${activePlayer.id === bottomPlayer.id ? "Your turn" : "Waiting"}</span>
         </header>
         ${renderPlayerVitals(bottomPlayer)}
       </article>
-      <div class="hand-cards">
-        ${handCards || `<p class="empty-card">Draw a card to start your turn.</p>`}
+      <div class="personal-hand">
+        <div class="hand-heading">
+          <span>Your hand</span>
+          <small class="your-card-count"><strong>${bottomPlayer.hand.length}</strong> card${bottomPlayer.hand.length === 1 ? "" : "s"}</small>
+        </div>
+        <div class="hand-cards">
+          ${handCards || `<p class="empty-card">Your cards will wait here.</p>`}
+        </div>
       </div>
     `
     : "";
 
+  const difficultyPicker = currentCard?.type === "question" && !currentCard.isRevealed
+    ? `<div class="choice-panel"><span class="challenge-kicker">Choose your stakes</span><h4>How difficult should this question be?</h4><div class="difficulty-choices">${difficultyTiers.map((tier) => `<button type="button" data-tier="${tier.name}"><strong>${tier.name}</strong><span>${tier.calculusPoints} CP · ${tier.damage} DMG · ${tier.timeLimit}s</span></button>`).join("")}</div></div>`
+    : "";
+  const targetPicker = currentCard?.type === "action"
+    ? `<div class="choice-panel"><span class="challenge-kicker">${currentCard.title}</span><h4>${currentCard.description}</h4><div class="target-choices${currentCard.actionId === "shield" || currentCard.actionId === "double-damage" ? " is-self-only" : ""}">${(currentCard.actionId === "shield" || currentCard.actionId === "double-damage" ? [activePlayer] : getAlivePlayers().filter((player) => player.id !== activePlayer.id)).map((player) => `<button type="button" data-target-id="${player.id}" ${turnState.isResolving ? "disabled" : ""}>${player.id === activePlayer.id ? "Use on yourself" : player.name}</button>`).join("")}</div></div>`
+    : "";
+
   currentCardElement.innerHTML = currentCard
-    ? `
+    ? currentCard.isRevealed ? `
       <article class="featured-card">
-        <img src="${currentCard.image}" alt="${currentCard.actionTitle} card">
-        <div>
-          <p class="card-label action-label">${currentCard.actionTitle} ${currentCard.difficulty}</p>
+        <img src="${currentCard.image}" alt="Question card">
+        <div class="challenge-copy">
+          <span class="challenge-kicker">Table challenge</span>
+          <p class="card-label action-label">${currentCard.difficulty}</p>
           <h4>${currentCard.prompt}</h4>
-          <p>Method: ${currentCard.method}</p>
+          <p class="method-note"><span>Suggested method</span>${currentCard.method}</p>
           ${isNpcPlayer(activePlayer) ? `<p class="solver-status">${activePlayer.name} is calculating...</p>` : answerForm}
         </div>
       </article>
-    `
-    : `<div class="empty-card empty-card-state"><span>01</span><strong>Draw a card</strong><p>Reveal a calculus problem and earn your advantage.</p></div>`;
+    ` : difficultyPicker || targetPicker
+    : `<div class="empty-card empty-card-state"><span>01</span><strong>${activePlayer?.turnsTaken === 0 ? "Draw a card" : "Choose your move"}</strong><p>${activePlayer?.turnsTaken === 0 ? "Every player's first turn begins with a draw." : "Draw to build your hand, or play a card from it."}</p></div>`;
 
   currentCardElement.querySelector(".answer-form")?.addEventListener("submit", submitAnswer);
   currentCardElement.querySelector(".answer-form input")?.focus();
+  currentCardElement.querySelectorAll("[data-tier]").forEach((button) => button.addEventListener("click", () => chooseQuestionDifficulty(button.dataset.tier)));
+  currentCardElement.querySelectorAll("[data-target-id]").forEach((button) => button.addEventListener("click", () => playActionCard(Number(button.dataset.targetId))));
 
   activeHandElement.querySelectorAll(".hand-card").forEach((button) => {
     button.addEventListener("click", () => {
+      playSound("select");
       playSelectedCard(Number(button.dataset.handIndex));
     });
   });
@@ -1161,12 +1595,16 @@ function renderOpponentSlot(element, player, direction) {
   element.innerHTML = `
     <article class="table-player ${direction}${player.isEliminated ? " is-eliminated" : ""}${isActive ? " is-active" : ""}">
       <div class="player-badge">
-        <div class="player-title"><p>${player.name}</p></div>
+        <div class="opponent-identity">
+          <span class="seat-avatar" aria-hidden="true">${getPlayerInitials(player.name)}</span>
+          <div class="player-title"><span>${isActive ? "Playing now" : "Opponent"}</span><p>${player.name}</p></div>
+        </div>
         ${renderPlayerVitals(player)}
-        <small>${getPlayerStatus(player)}</small>
+        <small class="status-chip">${getPlayerStatus(player)}</small>
       </div>
-      <div class="mini-hand ${direction}" aria-label="${player.name} hand">
-        ${renderCardBacks(Math.max(player.hand.length, 7), imagePaths.actionBack)}
+      <div class="mini-hand ${direction}" aria-label="${player.name} has ${player.hand.length} cards">
+        ${renderCardBacks(player.hand)}
+        <span class="hand-count"><strong>${player.hand.length}</strong><small>cards</small></span>
       </div>
     </article>
   `;
@@ -1186,6 +1624,7 @@ startButton.addEventListener("click", () => {
   startScreen.hidden = true;
   lobbyScreen.hidden = false;
   document.body.classList.remove("is-match");
+  syncBackgroundMusic();
   renderLobby();
 });
 
@@ -1195,6 +1634,7 @@ howToPlayButton.addEventListener("click", () => {
   renderConcepts();
   howToPlayModal.showModal();
 });
+
 
 closeHowToPlayButton.addEventListener("click", () => {
   howToPlayModal.close();
@@ -1212,8 +1652,10 @@ backButton.addEventListener("click", () => {
   document.body.classList.remove("is-match");
   document.body.classList.remove("is-roll-phase");
   clearNpcTimeout();
+  clearTurnAdvanceTimeout();
   clearRollCountdown();
   stopTimer();
+  syncBackgroundMusic();
 });
 
 lobbyBackButton.addEventListener("click", () => {
@@ -1225,6 +1667,8 @@ lobbyBackButton.addEventListener("click", () => {
   startScreen.hidden = false;
   document.body.classList.remove("is-match");
   document.body.classList.remove("is-roll-phase");
+  clearTurnAdvanceTimeout();
+  syncBackgroundMusic();
 });
 
 npcModeButton.addEventListener("click", selectNpcMode);
@@ -1243,12 +1687,67 @@ startMatchButton.addEventListener("click", () => {
   lobbyScreen.hidden = true;
   gameScreen.hidden = false;
   document.body.classList.add("is-match");
+  syncBackgroundMusic();
   resetGame(getJoinedLobbyPlayers());
 });
 
 rollOrderButton.addEventListener("click", rollTurnOrder);
 drawCardButton.addEventListener("click", drawCard);
 deckStackButton.addEventListener("click", drawCard);
+
+settingsButton.addEventListener("click", () => {
+  renderAudioSettings();
+  settingsModal.showModal();
+});
+
+menuSettingsButton.addEventListener("click", () => {
+  renderAudioSettings();
+  settingsModal.showModal();
+});
+
+settingsModal.addEventListener("click", (event) => {
+  if (event.target === settingsModal) settingsModal.close();
+});
+
+muteButton.addEventListener("click", () => {
+  audioSettings.muted = !audioSettings.muted;
+  saveAudioSettings();
+  renderAudioSettings();
+  if (!audioSettings.muted) {
+    syncBackgroundMusic();
+    playSound("click");
+  }
+});
+
+Object.entries(volumeInputs).forEach(([name, input]) => {
+  input.addEventListener("input", () => {
+    audioSettings[name] = Number(input.value) / 100;
+    document.querySelector(`#${name}-volume-value`).textContent = `${input.value}%`;
+    saveAudioSettings();
+    if (name === "music" && audioSettings[name] > 0) syncBackgroundMusic();
+  });
+  input.addEventListener("change", () => playSound(name === "game" ? "turn" : "click"));
+});
+
+document.addEventListener("click", (event) => {
+  if (event.target.closest("button") && !event.target.closest("#mute-button")) playSound("click");
+});
+
+document.addEventListener("pointerover", (event) => {
+  const button = event.target.closest("button:not(:disabled)");
+  if (button && !button.contains(event.relatedTarget)) playSound("hover");
+});
+
+document.addEventListener("pointerdown", unlockAudio, { once: true });
+document.addEventListener("keydown", unlockAudio, { once: true });
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    if (musicTimer) window.clearInterval(musicTimer);
+    musicTimer = null;
+    return;
+  }
+  if (audioContext) syncBackgroundMusic();
+});
 
 const invitedRoomCode = new URL(location.href).searchParams.get("room");
 
@@ -1262,3 +1761,4 @@ renderLobby();
 renderDifficultyTiers();
 renderRules();
 renderConcepts();
+renderAudioSettings();

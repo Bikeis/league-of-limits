@@ -3,7 +3,7 @@
 const SUPABASE_URL = "https://wnbxdoesaaafesvpkbvv.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_DbsYeFZT8kQdY4euO5PSTw_c8566AiQ";
 const realtimeClient = window.supabase?.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY) || null;
-const MULTIPLAYER_BUILD = "multiplayer-3";
+const MULTIPLAYER_BUILD = "multiplayer-4";
 document.documentElement.dataset.multiplayerBuild = MULTIPLAYER_BUILD;
 
 const startScreen = document.querySelector("#start-screen");
@@ -38,6 +38,16 @@ const settingsButton = document.querySelector("#settings-button");
 const menuSettingsButton = document.querySelector("#menu-settings-button");
 const settingsModal = document.querySelector("#settings-modal");
 const muteButton = document.querySelector("#mute-button");
+const gameOverModal = document.querySelector("#game-over-modal");
+const winnerNameElement = document.querySelector("#winner-name");
+const victoryReasonElement = document.querySelector("#victory-reason");
+const matchDurationElement = document.querySelector("#match-duration");
+const matchTurnsElement = document.querySelector("#match-turns");
+const matchPlayerCountElement = document.querySelector("#match-player-count");
+const finalStandingsListElement = document.querySelector("#final-standings-list");
+const playAgainButton = document.querySelector("#play-again-button");
+const gameOverLobbyButton = document.querySelector("#game-over-lobby-button");
+const playAgainNote = document.querySelector("#play-again-note");
 const volumeInputs = {
   master: document.querySelector("#master-volume"),
   ui: document.querySelector("#ui-volume"),
@@ -264,6 +274,8 @@ let isRoomHost = false;
 let roomPlayers = [];
 let roomSeatPlayerIds = [];
 let roomSyncTimer = null;
+let matchStartedAt = 0;
+let gameOverShown = false;
 let isApplyingRoomState = false;
 const localRoomPlayerId = sessionStorage.getItem("league-player-id") || crypto.randomUUID();
 sessionStorage.setItem("league-player-id", localRoomPlayerId);
@@ -470,6 +482,8 @@ function buildRoomState() {
     feedbackHtml: feedbackElement.innerHTML,
     timerText: timerDisplayElement.textContent,
     timerUrgent: timerDisplayElement.classList.contains("is-urgent"),
+    matchStartedAt,
+    gameOverShown,
   };
 }
 
@@ -498,6 +512,8 @@ function applyRoomState(state) {
   placements = state.placements || [];
   currentCard = state.currentCard || null;
   selectedHandIndex = state.selectedHandIndex ?? -1;
+  matchStartedAt = state.matchStartedAt || matchStartedAt;
+  const shouldShowGameOver = Boolean(state.turnState?.isMatchOver && !gameOverShown);
   Object.assign(turnState, state.turnState || {});
   usedQuestionPrompts = new Set(state.usedQuestionPrompts || []);
   feedbackElement.innerHTML = state.feedbackHtml || "";
@@ -505,6 +521,7 @@ function applyRoomState(state) {
   timerDisplayElement.textContent = state.timerText || "--";
   timerDisplayElement.classList.toggle("is-urgent", Boolean(state.timerUrgent));
   isApplyingRoomState = false;
+  if (shouldShowGameOver) showGameOver();
 }
 
 function requestHostAction(action, data = {}) {
@@ -514,6 +531,60 @@ function requestHostAction(action, data = {}) {
 function getGamePlayerForRoomId(roomPlayerId) {
   const seatIndex = roomSeatPlayerIds.indexOf(roomPlayerId);
   return players[seatIndex] || null;
+}
+
+function replaceDisconnectedPlayersWithNpcs() {
+  if (!isRoomHost || lobbyMode !== "friends" || gameScreen.hidden || players.length === 0) return;
+  const connectedIds = new Set(roomPlayers.map((presence) => presence.playerId));
+  const replacements = [];
+
+  roomSeatPlayerIds.forEach((roomPlayerId, seatIndex) => {
+    if (!roomPlayerId || connectedIds.has(roomPlayerId) || !players[seatIndex]) return;
+    const player = players[seatIndex];
+    player.name = `NPC ${seatIndex + 1}`;
+    roomSeatPlayerIds[seatIndex] = null;
+    replacements.push(player.name);
+  });
+
+  if (replacements.length === 0) return;
+  const message = replacements.length === 1
+    ? `${replacements[0]} has taken over the empty seat.`
+    : `${replacements.join(" and ")} have taken over the empty seats.`;
+  setFeedback("A player left the match", message);
+  showToast(message, "info");
+  renderAll();
+  broadcastRoomState();
+
+  if (isNpcPlayer(getActivePlayer()) && !turnState.isResolving) {
+    scheduleNpcTurn();
+  }
+}
+
+function resumeAuthoritativeTurn() {
+  if (!isRoomHost || turnState.isMatchOver) return;
+  const remaining = Number.parseInt(timerDisplayElement.textContent.match(/\d+/)?.[0] || "0", 10);
+
+  if (!turnState.isStarted) {
+    startRollCountdown();
+    return;
+  }
+
+  if (isNpcPlayer(getActivePlayer())) {
+    scheduleNpcTurn();
+    return;
+  }
+
+  if (remaining <= 0) {
+    startDrawTimer();
+  } else if (currentCard?.isRevealed) {
+    startTimer(remaining, "answer");
+  } else if (currentCard) {
+    startTimer(remaining, "choose");
+  } else if (turnState.hasDrawn) {
+    startTimer(remaining, "play");
+  } else {
+    startTimer(remaining, "draw");
+  }
 }
 
 function startRoomSyncHeartbeat() {
@@ -751,6 +822,9 @@ function resetGame(playerNames = getJoinedLobbyPlayers()) {
   turnState.hasDrawn = false;
   turnState.isResolving = false;
   usedQuestionPrompts = new Set();
+  matchStartedAt = Date.now();
+  gameOverShown = false;
+  if (gameOverModal.open) gameOverModal.close();
   players.forEach((player) => {
     for (let count = 0; count < 3; count += 1) {
       player.hand.push(deck.pop());
@@ -1115,6 +1189,67 @@ function useInfinityFeedback() {
   showToast(feedbackMessages.infinity, "info");
 }
 
+function formatMatchDuration(milliseconds) {
+  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function getMatchWinner() {
+  return players.find((player) => player.calculusPoints >= CP_TO_WIN)
+    || getAlivePlayers()[0]
+    || [...players].sort((a, b) => b.calculusPoints - a.calculusPoints || b.health - a.health)[0];
+}
+
+function showGameOver() {
+  if (gameOverShown || !turnState.isMatchOver || players.length === 0) return;
+  gameOverShown = true;
+  const winner = getMatchWinner();
+  const wonByPoints = winner.calculusPoints >= CP_TO_WIN;
+  const standings = [...players].sort((a, b) => {
+    if (a.id === winner.id) return -1;
+    if (b.id === winner.id) return 1;
+    return Number(a.isEliminated) - Number(b.isEliminated) || b.calculusPoints - a.calculusPoints || b.health - a.health;
+  });
+
+  winnerNameElement.textContent = winner.name;
+  victoryReasonElement.textContent = wonByPoints
+    ? `Won by reaching ${CP_TO_WIN} Calculus Points`
+    : "Won as the last player standing";
+  matchDurationElement.textContent = formatMatchDuration(Date.now() - matchStartedAt);
+  matchTurnsElement.textContent = String(turnState.turnNumber);
+  matchPlayerCountElement.textContent = String(players.length);
+  finalStandingsListElement.innerHTML = standings.map((player, index) => `
+    <article class="standing-row${player.id === winner.id ? " is-winner" : ""}" style="--standing-index:${index}">
+      <span class="standing-place">${index + 1}</span>
+      <span class="standing-avatar">${getPlayerInitials(player.name)}</span>
+      <div><strong>${player.name}</strong><small>${player.isEliminated ? "Eliminated" : player.id === winner.id ? "Winner" : "Survived"}</small></div>
+      <span><b>${player.calculusPoints}</b> CP</span>
+      <span><b>${player.health}</b> HP</span>
+    </article>
+  `).join("");
+  const guest = isFriendsGuest();
+  playAgainButton.hidden = guest;
+  playAgainNote.hidden = !guest;
+  gameOverModal.showModal();
+  playSound("win");
+  broadcastRoomState();
+}
+
+function returnToLobbyFromGameOver() {
+  if (gameOverModal.open) gameOverModal.close();
+  gameScreen.hidden = true;
+  lobbyScreen.hidden = false;
+  document.body.classList.remove("is-match", "is-roll-phase");
+  clearNpcTimeout();
+  clearTurnAdvanceTimeout();
+  clearRollCountdown();
+  stopTimer();
+  syncBackgroundMusic();
+  renderLobby();
+}
+
 function checkWinConditions() {
   players.forEach((player) => {
     if (player.health <= 0 && !player.isEliminated) {
@@ -1132,6 +1267,7 @@ function checkWinConditions() {
     feedbackElement.textContent = `${cpWinner.name} reached ${CP_TO_WIN} CP and wins the match.`;
     showToast(`${cpWinner.name} reached ${CP_TO_WIN} CP.`, "good");
     playSound("win");
+    window.setTimeout(showGameOver, 900);
   }
 
   if (alivePlayers.length === 1) {
@@ -1140,6 +1276,7 @@ function checkWinConditions() {
     feedbackElement.textContent = `${alivePlayers[0].name} wins as the last player remaining.`;
     showToast(`${alivePlayers[0].name} wins the match.`, "good");
     playSound("win");
+    window.setTimeout(showGameOver, 900);
   }
 }
 
@@ -1326,7 +1463,7 @@ function scheduleNpcTurn() {
   clearNpcTimeout();
   const activePlayer = getActivePlayer();
 
-  if (lobbyMode !== "npc" || !turnState.isStarted || !isNpcPlayer(activePlayer) || currentCard) {
+  if (!turnState.isStarted || !isNpcPlayer(activePlayer) || currentCard) {
     return;
   }
 
@@ -1604,11 +1741,13 @@ async function connectToRoom(code, hostRoom = false) {
       roomPlayers = getPresencePlayers();
       lobbyPlayers = Array.from({ length: 4 }, (_, index) => roomPlayers[index] ? `Player ${index + 1}` : null);
       renderLobby();
+      replaceDisconnectedPlayersWithNpcs();
     })
     .on("presence", { event: "leave" }, () => {
       roomPlayers = getPresencePlayers();
       lobbyPlayers = Array.from({ length: 4 }, (_, index) => roomPlayers[index] ? `Player ${index + 1}` : null);
       renderLobby();
+      replaceDisconnectedPlayersWithNpcs();
     })
     .on("broadcast", { event: "match_start" }, ({ payload }) => {
       if (isRoomHost) return;
@@ -1626,6 +1765,17 @@ async function connectToRoom(code, hostRoom = false) {
     })
     .on("broadcast", { event: "state_request" }, () => {
       if (isRoomHost && !gameScreen.hidden && players.length > 0) broadcastRoomState();
+    })
+    .on("broadcast", { event: "host_transfer" }, ({ payload }) => {
+      if (!payload || payload.successorId !== localRoomPlayerId) return;
+      applyRoomState(payload.state);
+      isRoomHost = true;
+      startRoomSyncHeartbeat();
+      window.setTimeout(() => {
+        roomPlayers = getPresencePlayers();
+        replaceDisconnectedPlayersWithNpcs();
+        resumeAuthoritativeTurn();
+      }, 500);
     })
     .subscribe(async (status) => {
       if (status === "SUBSCRIBED") {
@@ -1818,7 +1968,16 @@ howToPlayModal.addEventListener("click", (event) => {
   }
 });
 
-backButton.addEventListener("click", () => {
+backButton.addEventListener("click", async () => {
+  if (lobbyMode === "friends" && roomChannel) {
+    if (isRoomHost) {
+      const successor = roomPlayers.find((presence) => presence.playerId !== localRoomPlayerId);
+      if (successor) {
+        await sendRoomEvent("host_transfer", { successorId: successor.playerId, state: buildRoomState() });
+      }
+    }
+    await leaveRealtimeRoom();
+  }
   gameScreen.hidden = true;
   lobbyScreen.hidden = false;
   document.body.classList.remove("is-match");
@@ -1874,6 +2033,17 @@ startMatchButton.addEventListener("click", () => {
 rollOrderButton.addEventListener("click", rollTurnOrder);
 drawCardButton.addEventListener("click", drawCard);
 deckStackButton.addEventListener("click", drawCard);
+
+playAgainButton.addEventListener("click", () => {
+  if (isFriendsGuest()) return;
+  resetGame(players.map((player) => player.name));
+  if (lobbyMode === "friends" && isRoomHost) {
+    sendRoomEvent("match_start", { state: buildRoomState() });
+    startRoomSyncHeartbeat();
+  }
+});
+
+gameOverLobbyButton.addEventListener("click", returnToLobbyFromGameOver);
 
 settingsButton.addEventListener("click", () => {
   renderAudioSettings();

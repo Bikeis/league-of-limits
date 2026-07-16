@@ -11,34 +11,43 @@
 <body>
   <main class="game-shell" aria-labelledby="game-title">
     <section id="start-screen" class="start-screen">
+      <div class="ambient-card ambient-card-one" aria-hidden="true"><span>lim</span><strong>x→∞</strong></div>
+      <div class="ambient-card ambient-card-two" aria-hidden="true"><span>f(x)</span><strong>?</strong></div>
       <h1 id="game-title" class="sr-only">League of Limits</h1>
       <div class="title-wrap">
+        <p class="eyebrow"><span></span> Pull up a chair <span></span></p>
         <img class="game-logo" src="assets/media/photos/Logo.png" alt="League of Limits logo">
         <p class="project-label">Group 4 Culminating Project</p>
-        <p class="game-tagline">A turn-based Basic Calculus card game about limits and continuity.</p>
+        <p class="game-tagline">Outthink your friends, bend the rules, and make every limit count.</p>
       </div>
 
       <div class="start-actions">
-        <button id="start-button" class="start-button" type="button">Start</button>
-        <button id="how-to-play-button" class="secondary-button how-button" type="button">How to Play</button>
+        <button id="start-button" class="start-button" type="button"><span>Take a seat</span><small>Start playing</small></button>
+        <button id="how-to-play-button" class="secondary-button how-button" type="button">How it works</button>
+        <button id="menu-settings-button" class="secondary-button menu-settings-button" type="button" aria-haspopup="dialog" aria-controls="settings-modal"><span aria-hidden="true">⚙</span> Settings</button>
       </div>
+      <p class="start-note">2–4 players <span aria-hidden="true">•</span> About 15 minutes <span aria-hidden="true">•</span> A little calculus helps</p>
     </section>
 
     <section id="lobby-screen" class="lobby-screen" aria-labelledby="lobby-title" hidden>
       <div class="section-heading">
         <p class="project-label">League of Limits</p>
-        <h2 id="lobby-title">Choose Match</h2>
+        <h2 id="lobby-title">Who’s joining the table?</h2>
       </div>
 
       <div class="mode-grid">
         <button id="npc-mode-button" class="mode-card" type="button">
-          <span>Play with NPCs</span>
-          <small>Fill the empty seats with computer players.</small>
+          <span class="mode-icon" aria-hidden="true">♟</span>
+          <span>Practice round</span>
+          <small>Take on three computer players and learn at your own pace.</small>
+          <em>Play now →</em>
         </button>
 
         <button id="friends-mode-button" class="mode-card" type="button">
-          <span>Play with Friends</span>
-          <small>Create a room and invite friends with a link.</small>
+          <span class="mode-icon" aria-hidden="true">♣</span>
+          <span>Friends’ table</span>
+          <small>Open a private room and bring up to three friends.</small>
+          <em>Create a room →</em>
         </button>
       </div>
 
@@ -84,6 +93,14 @@
       <div class="match-layout">
         <div class="table-column">
           <section id="table-layout" class="table-layout" aria-label="Game table">
+            <div class="formula-field" aria-hidden="true">
+              <span class="formula formula-a">lim <i>x→a</i> f(x)</span>
+              <span class="formula formula-b">∫ f(x) dx</span>
+              <span class="formula formula-c">f′(x) = lim Δx→0</span>
+              <span class="formula formula-d">eˣ = lim (1 + x/n)ⁿ</span>
+              <span class="formula formula-e">x² − a² = (x−a)(x+a)</span>
+              <span class="formula formula-f">lim <i>x→∞</i> 1/x = 0</span>
+            </div>
             <div id="top-opponent" class="opponent-row opponent-top"></div>
             <div id="left-opponent" class="opponent-side opponent-left"></div>
             <div class="center-play">
@@ -92,26 +109,28 @@
                 <span>Draw <strong id="deck-count">24</strong></span>
               </button>
               <div id="current-card" class="current-card"></div>
-              <div class="discard-stack">
-                <img src="assets/media/photos/action/yellow_back_card.jpg" alt="Yellow discard back">
+              <div id="discard-stack" class="discard-stack" aria-label="Played card pile">
+                <div id="played-card-pile" class="played-card-pile"></div>
                 <span>Used <strong id="discard-count">0</strong></span>
               </div>
             </div>
             <div id="right-opponent" class="opponent-side opponent-right"></div>
-            <div id="active-hand" class="active-hand"></div>
+            <div id="active-hand" class="active-hand" aria-label="Your player area and card hand"></div>
             <div id="dice-roll-panel" class="dice-roll-panel" aria-live="polite"></div>
           </section>
 
           <section class="control-panel" aria-label="Game controls">
-            <p id="feedback-message">Roll dice to determine turn order.</p>
+            <p class="action-kicker">Your next move</p>
+            <p id="feedback-message" aria-live="polite">Roll dice to determine turn order.</p>
             <div class="primary-actions">
-              <button id="roll-order-button" class="control-button" type="button">Roll Dice</button>
-              <button id="draw-card-button" class="control-button" type="button">Draw Card</button>
-            </div>
-            <div class="leave-actions">
-              <button id="back-button" class="control-button leave-button" type="button">Leave Match</button>
+              <button id="roll-order-button" class="control-button roll-button" type="button"><span class="roll-button-icon" aria-hidden="true">⚄</span><span>Roll Dice</span></button>
+              <button id="draw-card-button" class="control-button" type="button">Draw &amp; End Turn</button>
             </div>
           </section>
+          <div class="leave-actions">
+            <button id="settings-button" class="settings-button" type="button" aria-haspopup="dialog" aria-controls="settings-modal"><span aria-hidden="true">⚙</span> Settings</button>
+            <button id="back-button" class="control-button leave-button" type="button"><span aria-hidden="true">←</span> Leave Match</button>
+          </div>
         </div>
       </div>
     </section>
@@ -130,8 +149,8 @@
         <section class="goal-panel" aria-labelledby="goal-title">
           <div class="goal-copy">
             <p class="panel-kicker">Your Goal</p>
-            <h3 id="goal-title">Reach <strong>15 CP</strong> to earn a placement, or outlast everyone to win the match.</h3>
-            <p class="match-start"><strong>Before play:</strong> Everyone rolls two dice. The lowest total takes the first turn.</p>
+            <h3 id="goal-title">Reach <strong>15 CP</strong>, or be the last player standing, to win the match.</h3>
+            <p class="match-start"><strong>Setup:</strong> Shuffle 10 question cards and 12 action cards together. Everyone starts with three cards, then rolls two dice. Lowest total goes first.</p>
           </div>
           <div class="stat-key" aria-label="Starting stats">
             <div><strong>8</strong><span>Starting HP</span></div>
@@ -143,7 +162,7 @@
           <div class="section-heading">
             <div>
               <p class="panel-kicker">The Basics</p>
-              <h3 id="turn-title">What happens on your turn</h3>
+              <h3 id="turn-title">Draw one or play one</h3>
             </div>
             <p><strong>CP</strong> = Calculus Points</p>
           </div>
@@ -154,9 +173,9 @@
           <div class="section-heading">
             <div>
               <p class="panel-kicker">Risk &amp; Reward</p>
-              <h3 id="difficulty-title">Question difficulty</h3>
+              <h3 id="difficulty-title">Choose your question stakes</h3>
             </div>
-            <p>Harder cards give you more time and bigger rewards.</p>
+            <p>Every question lets you choose Easy, Medium, or Hard.</p>
           </div>
           <div id="difficulty-tiers" class="tier-list"></div>
         </section>
@@ -165,15 +184,56 @@
           <div class="section-heading">
             <div>
               <p class="panel-kicker">Power Cards</p>
-              <h3 id="effects-title">Effects earned with a correct answer</h3>
+              <h3 id="effects-title">Twelve action cards</h3>
             </div>
-            <p>Every question card also carries one of these effects.</p>
+            <p>There are exactly three copies of each action.</p>
           </div>
           <div id="concept-list" class="concept-list"></div>
         </section>
 
-        <p class="how-tip"><strong>Quick tip:</strong> Watch your timer, and type answers like <span>1/2</span>, <span>Yes</span>, or <span>Infinity</span>. At 0 HP, you are eliminated.</p>
+        <p class="how-tip"><strong>Quick tip:</strong> Drawing ends your turn, so build your hand with intention. Played cards stack in the center and become the new deck when the draw pile empties. At 0 HP, you are eliminated.</p>
       </div>
+    </dialog>
+
+    <dialog id="settings-modal" class="settings-modal">
+      <form method="dialog" class="settings-content">
+        <header class="settings-heading">
+          <div>
+            <p class="panel-kicker">Game preferences</p>
+            <h2>Settings</h2>
+          </div>
+          <button id="close-settings" class="settings-close" value="close" type="submit" aria-label="Close settings">×</button>
+        </header>
+
+        <section class="sound-settings" aria-labelledby="sound-settings-title">
+          <div class="settings-section-heading">
+            <div>
+              <h3 id="sound-settings-title">Sound</h3>
+              <p>Adjust each part of the game independently.</p>
+            </div>
+            <button id="mute-button" class="mute-button" type="button" aria-pressed="false">Mute all</button>
+          </div>
+
+          <label class="volume-control" for="master-volume">
+            <span><strong>Master volume</strong><output id="master-volume-value">70%</output></span>
+            <input id="master-volume" type="range" min="0" max="100" value="70">
+          </label>
+          <label class="volume-control" for="ui-volume">
+            <span><strong>Buttons &amp; cards</strong><output id="ui-volume-value">65%</output></span>
+            <input id="ui-volume" type="range" min="0" max="100" value="65">
+          </label>
+          <label class="volume-control" for="game-volume">
+            <span><strong>Gameplay cues</strong><output id="game-volume-value">75%</output></span>
+            <input id="game-volume" type="range" min="0" max="100" value="75">
+          </label>
+          <label class="volume-control" for="music-volume">
+            <span><strong>Background music</strong><output id="music-volume-value">35%</output></span>
+            <input id="music-volume" type="range" min="0" max="100" value="35">
+          </label>
+        </section>
+
+        <p class="settings-note">Settings are saved on this device.</p>
+      </form>
     </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>

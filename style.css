@@ -995,3 +995,52 @@ body.is-match:has(.control-panel button:disabled) .control-panel button:disabled
   62% { opacity: 1; transform: translate(-50%,4px) scale(1.025); }
   100% { opacity: 1; transform: translate(-50%,0) scale(1); filter: none; }
 }
+
+/* Fantasy game-over ceremony */
+.game-over-modal { width: min(720px,calc(100% - 28px)); max-height: calc(100vh - 24px); overflow: auto; border: 1px solid #9f702b; border-radius: 6px; padding: 0; background: #0c120c; color: var(--cream); box-shadow: 0 35px 90px rgba(0,0,0,.78),0 0 0 4px #1b120a,0 0 0 5px rgba(193,133,38,.35); }
+.game-over-modal::backdrop { background: radial-gradient(circle at center,rgba(35,53,31,.42),rgba(0,0,0,.9)); backdrop-filter: blur(8px); animation: game-over-backdrop .55s both; }
+.game-over-content { position: relative; display: grid; justify-items: center; overflow: hidden; padding: 34px; background: radial-gradient(circle at 50% 12%,rgba(232,184,77,.12),transparent 35%),linear-gradient(145deg,#172017,#080d09); text-align: center; }
+.game-over-content::before,.game-over-content::after { position: absolute; width: 120px; height: 120px; border: solid rgba(180,121,32,.32); content: ""; transform: rotate(45deg); }
+.game-over-content::before { left: -75px; top: -75px; border-width: 0 2px 2px 0; }
+.game-over-content::after { right: -75px; bottom: -75px; border-width: 2px 0 0 2px; }
+.game-over-kicker { margin: 0 0 4px; color: #c9973d; font: 900 .65rem var(--utility); letter-spacing: .18em; text-transform: uppercase; animation: ceremony-rise .45s .15s both; }
+.game-over-modal h2 { margin: 0; color: #f0cc78; font-size: clamp(2.6rem,7vw,4.5rem); line-height: 1; text-transform: uppercase; text-shadow: 0 3px 0 #684318,0 0 22px rgba(232,184,77,.2); animation: game-over-title .7s .08s cubic-bezier(.16,.9,.24,1) both; }
+.winner-medallion { display: grid; width: 66px; height: 66px; margin: 20px 0 10px; place-items: center; border: 1px solid #b17a2c; border-radius: 50%; background: radial-gradient(circle,#45351d,#17170f 70%); color: #f1c45d; font-size: 1.85rem; box-shadow: inset 0 0 0 5px rgba(0,0,0,.3),0 0 24px rgba(232,184,77,.2); animation: medallion-in .65s .35s both; }
+.winner-name { margin: 0; color: #fff0c7; font: 700 clamp(1.7rem,4vw,2.5rem) var(--serif); animation: ceremony-rise .45s .48s both; }
+.victory-reason { margin: 5px 0 20px; color: var(--muted); font-size: .82rem; animation: ceremony-rise .45s .55s both; }
+.match-summary { display: grid; grid-template-columns: repeat(3,1fr); width: 100%; border: solid rgba(182,124,35,.26); border-width: 1px 0; animation: ceremony-rise .45s .62s both; }
+.match-summary div { display: grid; gap: 3px; padding: 13px; }
+.match-summary div + div { border-left: 1px solid rgba(182,124,35,.2); }
+.match-summary span { color: var(--muted); font: 900 .56rem var(--utility); letter-spacing: .11em; text-transform: uppercase; }
+.match-summary strong { color: #efc565; font: 700 1.35rem var(--serif); }
+.final-standings { width: 100%; margin-top: 20px; text-align: left; }
+.final-standings h3 { margin: 0 0 9px; color: #d5a64a; font-size: .78rem; letter-spacing: .1em; text-align: center; text-transform: uppercase; }
+.final-standings-list { display: grid; gap: 6px; }
+.standing-row { display: grid; grid-template-columns: 28px 38px 1fr 58px 58px; gap: 9px; align-items: center; border: 1px solid rgba(255,255,255,.07); border-radius: 4px; padding: 9px 11px; background: rgba(255,255,255,.025); animation: standing-in .42s calc(.7s + var(--standing-index) * 70ms) both; }
+.standing-row.is-winner { border-color: rgba(232,184,77,.48); background: linear-gradient(90deg,rgba(232,184,77,.1),rgba(232,184,77,.025)); }
+.standing-place { color: var(--gold); font: 700 1rem var(--serif); }
+.standing-avatar { display: grid; width: 34px; height: 34px; place-items: center; border: 1px solid rgba(232,184,77,.35); border-radius: 50%; color: var(--cream); font-size: .62rem; font-weight: 900; }
+.standing-row div { display: grid; }
+.standing-row div strong { color: var(--cream); font: 700 .95rem var(--serif); }
+.standing-row div small { color: var(--muted); font-size: .58rem; text-transform: uppercase; }
+.standing-row > span:nth-last-child(-n+2) { color: var(--muted); font: 800 .6rem var(--utility); text-align: right; }
+.standing-row > span b { color: var(--gold); font-size: .88rem; }
+.game-over-actions { display: flex; gap: 9px; margin-top: 20px; animation: ceremony-rise .45s 1s both; }
+.play-again-button,.game-over-lobby-button { min-height: 46px; border-radius: 4px; padding: 10px 20px; font-weight: 900; }
+.play-again-button { border: 1px solid #e1b451; background: linear-gradient(#f0c85e,#c88a2d); color: #261805; box-shadow: 0 4px 0 #704518,0 12px 24px rgba(0,0,0,.3); }
+.game-over-lobby-button { border: 1px solid rgba(232,184,77,.28); background: #181b14; color: var(--cream); }
+.play-again-note { margin: 18px 0 0; color: var(--muted); font-style: italic; }
+.game-over-modal[open] { animation: game-over-shell .55s cubic-bezier(.16,.9,.24,1) both; }
+@keyframes game-over-shell { from { opacity: 0; transform: translateY(28px) scale(.92); } to { opacity: 1; transform: none; } }
+@keyframes game-over-backdrop { from { opacity: 0; } to { opacity: 1; } }
+@keyframes game-over-title { from { opacity: 0; transform: scale(.65); letter-spacing: .3em; } to { opacity: 1; transform: none; letter-spacing: normal; } }
+@keyframes medallion-in { from { opacity: 0; transform: rotate(-35deg) scale(.4); } to { opacity: 1; transform: none; } }
+@keyframes ceremony-rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+@keyframes standing-in { from { opacity: 0; transform: translateX(-16px); } to { opacity: 1; transform: none; } }
+
+@media (max-width: 520px) {
+  .game-over-content { padding: 25px 15px; }
+  .standing-row { grid-template-columns: 24px 32px 1fr 48px; }
+  .standing-row > span:last-child { display: none; }
+  .game-over-actions { display: grid; width: 100%; }
+}

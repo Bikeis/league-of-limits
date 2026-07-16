@@ -260,6 +260,7 @@ let roomChannel = null;
 let roomCode = null;
 let isRoomHost = false;
 let roomPlayers = [];
+let isApplyingRoomState = false;
 const localRoomPlayerId = sessionStorage.getItem("league-player-id") || crypto.randomUUID();
 sessionStorage.setItem("league-player-id", localRoomPlayerId);
 
@@ -430,6 +431,99 @@ function unlockAudio() {
 
 function isLocalHumanPlayer(player) {
   return Boolean(player && !isNpcPlayer(player) && (lobbyMode === "npc" ? player.id === 1 : true));
+}
+
+function isFriendsGuest() {
+  return lobbyMode === "friends" && roomChannel && !isRoomHost;
+}
+
+function getLocalGamePlayer() {
+  if (lobbyMode !== "friends") {
+    return players.find((player) => player.id === 1) || null;
+  }
+
+  const seatIndex = roomPlayers.findIndex((presence) => presence.playerId === localRoomPlayerId);
+  return players[seatIndex] || null;
+}
+
+async function sendRoomEvent(event, payload) {
+  if (!roomChannel) return;
+  await roomChannel.send({ type: "broadcast", event, payload });
+}
+
+function buildRoomState() {
+  return {
+    players,
+    deck,
+    discardPile,
+    placements,
+    currentCard,
+    selectedHandIndex,
+    turnState: { ...turnState },
+    usedQuestionPrompts: [...usedQuestionPrompts],
+    feedbackHtml: feedbackElement.innerHTML,
+    timerText: timerDisplayElement.textContent,
+    timerUrgent: timerDisplayElement.classList.contains("is-urgent"),
+  };
+}
+
+function broadcastRoomState() {
+  if (lobbyMode === "friends" && isRoomHost && roomChannel && !isApplyingRoomState) {
+    sendRoomEvent("match_state", buildRoomState());
+  }
+}
+
+function applyRoomState(state) {
+  if (!state || isRoomHost) return;
+  isApplyingRoomState = true;
+  if (state.turnState?.isStarted || state.players?.length) {
+    lobbyScreen.hidden = true;
+    gameScreen.hidden = false;
+    document.body.classList.add("is-match");
+    syncBackgroundMusic();
+  }
+  clearNpcTimeout();
+  clearTurnAdvanceTimeout();
+  stopTimer();
+  players = state.players || [];
+  deck = state.deck || [];
+  discardPile = state.discardPile || [];
+  placements = state.placements || [];
+  currentCard = state.currentCard || null;
+  selectedHandIndex = state.selectedHandIndex ?? -1;
+  Object.assign(turnState, state.turnState || {});
+  usedQuestionPrompts = new Set(state.usedQuestionPrompts || []);
+  feedbackElement.innerHTML = state.feedbackHtml || "";
+  renderAll();
+  timerDisplayElement.textContent = state.timerText || "--";
+  timerDisplayElement.classList.toggle("is-urgent", Boolean(state.timerUrgent));
+  isApplyingRoomState = false;
+}
+
+function requestHostAction(action, data = {}) {
+  sendRoomEvent("player_action", { action, data, playerId: localRoomPlayerId });
+}
+
+function getGamePlayerForRoomId(roomPlayerId) {
+  const seatIndex = roomPlayers.findIndex((presence) => presence.playerId === roomPlayerId);
+  return players[seatIndex] || null;
+}
+
+function handleGuestAction(payload) {
+  if (!isRoomHost || !payload) return;
+  const requestingPlayer = getGamePlayerForRoomId(payload.playerId);
+  const activePlayer = getActivePlayer();
+  const { action, data = {} } = payload;
+  const expectedPlayer = action === "roll" ? getRollingPlayer() : activePlayer;
+
+  if (!requestingPlayer || requestingPlayer.id !== expectedPlayer?.id || turnState.isResolving) return;
+
+  if (action === "roll") rollTurnOrder();
+  if (action === "draw") drawCard();
+  if (action === "play_card") playSelectedCard(Number(data.index));
+  if (action === "difficulty") chooseQuestionDifficulty(String(data.tier));
+  if (action === "target") playActionCard(Number(data.targetId));
+  if (action === "answer") submitAnswerValue(String(data.answer || ""));
 }
 
 function shuffle(items) {
@@ -665,6 +759,10 @@ function finishRollOrder() {
 }
 
 function rollTurnOrder() {
+  if (isFriendsGuest()) {
+    requestHostAction("roll");
+    return;
+  }
   if (turnState.isStarted || turnState.isRolling) {
     return;
   }
@@ -722,6 +820,10 @@ function rollTurnOrder() {
 }
 
 function drawCard() {
+  if (isFriendsGuest()) {
+    requestHostAction("draw");
+    return;
+  }
   if (!turnState.isStarted || turnState.isMatchOver || turnState.isResolving || turnState.hasDrawn || currentCard) {
     return;
   }
@@ -761,6 +863,10 @@ function drawCard() {
 }
 
 function playSelectedCard(index) {
+  if (isFriendsGuest()) {
+    requestHostAction("play_card", { index });
+    return;
+  }
   const activePlayer = getActivePlayer();
 
   if (turnState.isResolving || !activePlayer || !activePlayer.hand[index] || currentCard || activePlayer.turnsTaken === 0 || turnState.hasDrawn) {
@@ -778,6 +884,10 @@ function playSelectedCard(index) {
 }
 
 function chooseQuestionDifficulty(tierName) {
+  if (isFriendsGuest()) {
+    requestHostAction("difficulty", { tier: tierName });
+    return;
+  }
   if (!currentCard || currentCard.type !== "question") {
     return;
   }
@@ -797,6 +907,10 @@ function chooseQuestionDifficulty(tierName) {
 }
 
 function playActionCard(targetId) {
+  if (isFriendsGuest()) {
+    requestHostAction("target", { targetId });
+    return;
+  }
   if (turnState.isResolving || !currentCard || currentCard.type !== "action") {
     return;
   }
@@ -913,6 +1027,16 @@ function submitAnswer(event) {
 
   const formData = new FormData(event.currentTarget);
   const submittedAnswer = normalizeAnswer(String(formData.get("answer") || ""));
+  if (isFriendsGuest()) {
+    requestHostAction("answer", { answer: submittedAnswer });
+    return;
+  }
+  submitAnswerValue(submittedAnswer);
+}
+
+function submitAnswerValue(answer) {
+  if (!currentCard || turnState.isResolving) return;
+  const submittedAnswer = normalizeAnswer(answer);
   const correctAnswer = normalizeAnswer(currentCard.answer);
 
   if (submittedAnswer === correctAnswer) {
@@ -1130,6 +1254,7 @@ function startTimer(seconds, mode = "answer") {
     remaining -= 1;
     timerDisplayElement.textContent = `${timerLabel} ${remaining}s`;
     timerDisplayElement.classList.toggle("is-urgent", remaining <= 5);
+    broadcastRoomState();
 
     if (remaining <= 0) {
       if (timerMode === "draw") {
@@ -1263,6 +1388,8 @@ function renderDifficultyTiers() {
 function renderTurnSystem() {
   const activePlayer = getActivePlayer();
   const isNpcTurn = isNpcPlayer(activePlayer);
+  const localPlayer = getLocalGamePlayer();
+  const isLocalTurn = lobbyMode !== "friends" || activePlayer?.id === localPlayer?.id;
   const rollingPlayer = getRollingPlayer();
   document.body.classList.toggle("is-roll-phase", !turnState.isStarted);
   turnCounterElement.textContent = turnState.isStarted
@@ -1275,10 +1402,11 @@ function renderTurnSystem() {
     ? timerDisplayElement.textContent
     : lobbyMode === "friends" ? `Lowest roll goes first | ${rollCountdown}s` : "Lowest roll goes first";
   const canDraw = deck.length > 0 || discardPile.length > 0;
-  drawCardButton.disabled = !turnState.isStarted || turnState.isMatchOver || turnState.isResolving || turnState.hasDrawn || Boolean(currentCard) || isNpcTurn || !canDraw;
+  drawCardButton.disabled = !turnState.isStarted || turnState.isMatchOver || turnState.isResolving || turnState.hasDrawn || Boolean(currentCard) || isNpcTurn || !isLocalTurn || !canDraw;
   deckStackButton.disabled = drawCardButton.disabled;
   deckStackButton.classList.toggle("is-ready", !deckStackButton.disabled);
-  rollOrderButton.hidden = turnState.isStarted || turnState.isRolling || (lobbyMode === "npc" && isNpcPlayer(rollingPlayer));
+  const isLocalRoll = lobbyMode !== "friends" || rollingPlayer?.id === localPlayer?.id;
+  rollOrderButton.hidden = turnState.isStarted || turnState.isRolling || !isLocalRoll || (lobbyMode === "npc" && isNpcPlayer(rollingPlayer));
   rollOrderButton.disabled = rollOrderButton.hidden;
   rollOrderButton.textContent = turnState.isStarted ? "Dice Rolled" : "Roll Dice";
 }
@@ -1457,6 +1585,23 @@ async function connectToRoom(code, hostRoom = false) {
       lobbyPlayers = Array.from({ length: 4 }, (_, index) => roomPlayers[index] ? `Player ${index + 1}` : null);
       renderLobby();
     })
+    .on("broadcast", { event: "match_start" }, ({ payload }) => {
+      if (isRoomHost) return;
+      lobbyScreen.hidden = true;
+      gameScreen.hidden = false;
+      document.body.classList.add("is-match");
+      syncBackgroundMusic();
+      applyRoomState(payload.state);
+    })
+    .on("broadcast", { event: "match_state" }, ({ payload }) => {
+      applyRoomState(payload);
+    })
+    .on("broadcast", { event: "player_action" }, ({ payload }) => {
+      handleGuestAction(payload);
+    })
+    .on("broadcast", { event: "state_request" }, () => {
+      if (isRoomHost && turnState.isStarted) broadcastRoomState();
+    })
     .subscribe(async (status) => {
       if (status === "SUBSCRIBED") {
         await roomChannel.track({
@@ -1464,6 +1609,7 @@ async function connectToRoom(code, hostRoom = false) {
           isHost: isRoomHost,
           joinedAt: Date.now(),
         });
+        if (!isRoomHost) sendRoomEvent("state_request", { playerId: localRoomPlayerId });
         return;
       }
 
@@ -1495,7 +1641,7 @@ function renderTable() {
   const activePlayer = getActivePlayer();
   const bottomPlayer = lobbyMode === "npc"
     ? players.find((player) => player.id === 1)
-    : activePlayer;
+    : getLocalGamePlayer() || activePlayer;
   const opponents = players.filter((player) => !bottomPlayer || player.id !== bottomPlayer.id);
   tableLayoutElement.dataset.players = String(players.length);
 
@@ -1618,6 +1764,7 @@ function renderAll() {
   renderConcepts();
   renderDeckCounts();
   renderTable();
+  broadcastRoomState();
 }
 
 startButton.addEventListener("click", () => {
@@ -1689,6 +1836,9 @@ startMatchButton.addEventListener("click", () => {
   document.body.classList.add("is-match");
   syncBackgroundMusic();
   resetGame(getJoinedLobbyPlayers());
+  if (lobbyMode === "friends" && isRoomHost) {
+    sendRoomEvent("match_start", { state: buildRoomState() });
+  }
 });
 
 rollOrderButton.addEventListener("click", rollTurnOrder);

@@ -6,7 +6,7 @@
   <title>League of Limits</title>
   <link rel="stylesheet" href="style.css">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="game.js?v=multiplayer-3" defer></script>
+  <script src="game.js?v=multiplayer-4" defer></script>
 </head>
 <body>
   <main class="game-shell" aria-labelledby="game-title">
@@ -234,6 +234,33 @@
 
         <p class="settings-note">Settings are saved on this device.</p>
       </form>
+    </dialog>
+
+    <dialog id="game-over-modal" class="game-over-modal" aria-labelledby="game-over-title">
+      <div class="game-over-content">
+        <p class="game-over-kicker">The match has concluded</p>
+        <h2 id="game-over-title">Game Over</h2>
+        <div class="winner-medallion" aria-hidden="true">♛</div>
+        <p id="winner-name" class="winner-name">Player 1</p>
+        <p id="victory-reason" class="victory-reason">Reached 15 Calculus Points</p>
+
+        <div class="match-summary" aria-label="Match summary">
+          <div><span>Duration</span><strong id="match-duration">00:00</strong></div>
+          <div><span>Turns</span><strong id="match-turns">0</strong></div>
+          <div><span>Players</span><strong id="match-player-count">0</strong></div>
+        </div>
+
+        <section class="final-standings" aria-labelledby="final-standings-title">
+          <h3 id="final-standings-title">Final Standings</h3>
+          <div id="final-standings-list" class="final-standings-list"></div>
+        </section>
+
+        <div class="game-over-actions">
+          <button id="play-again-button" class="play-again-button" type="button"><span aria-hidden="true">↻</span> Play Again</button>
+          <button id="game-over-lobby-button" class="game-over-lobby-button" type="button">Return to Lobby</button>
+        </div>
+        <p id="play-again-note" class="play-again-note" hidden>Waiting for the host to begin another match.</p>
+      </div>
     </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>

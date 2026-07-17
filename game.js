@@ -3,7 +3,7 @@
 const SUPABASE_URL = "https://wnbxdoesaaafesvpkbvv.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_DbsYeFZT8kQdY4euO5PSTw_c8566AiQ";
 const realtimeClient = window.supabase?.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY) || null;
-const MULTIPLAYER_BUILD = "ui-13";
+const MULTIPLAYER_BUILD = "ui-22";
 document.documentElement.dataset.multiplayerBuild = MULTIPLAYER_BUILD;
 
 const startScreen = document.querySelector("#start-screen");
@@ -172,75 +172,94 @@ const npcAccuracyByTier = {
 const questionBank = [
   {
     tier: "Easy",
-    prompt: "lim x->2 (x + 3)",
-    answer: "5",
-    method: "Direct Substitution",
-  },
-  {
-    tier: "Easy",
-    prompt: "lim x->1 (x^2 + 2x)",
-    answer: "3",
-    method: "Direct Substitution",
-  },
-  {
-    tier: "Easy",
-    prompt: "lim x->4 (12 / x)",
-    answer: "3",
-    method: "Direct Substitution",
-  },
-  {
-    tier: "Easy",
-    prompt: "Is f(x) = x + 1 continuous at x = 2?",
+    prompt: "Is f(x) = x^2 - 3x + 5 continuous at x = 2?",
     answer: "Yes",
+    answers: ["Yes", "Continuous"],
+    choices: ["Yes", "No", "Only from the left", "Only from the right"],
     method: "Continuity Test",
   },
   {
-    tier: "Medium",
-    prompt: "lim x->3 ((x^2 - 9) / (x - 3))",
+    tier: "Easy",
+    prompt: "Do both one-sided limits of f(x) = 3x + 1 exist and agree at x = 2?",
+    answer: "Yes",
+    answers: ["Yes", "Exists", "The limit exists"],
+    choices: ["Yes", "No", "Only the left-hand limit", "Only the right-hand limit"],
+    method: "One-Sided Limits",
+  },
+  {
+    tier: "Easy",
+    prompt: "Given f(x) = x + 1 for x < 5 and f(x) = (x - 5)^2 + 3 for x >= 5, find lim x->5 f(x).",
+    answer: "DNE",
+    answers: ["DNE", "Does not exist", "The limit does not exist"],
+    choices: ["DNE", "3", "5", "6"],
+    method: "One-Sided Limits",
+  },
+  {
+    tier: "Easy",
+    prompt: "What hidden value does f(x) = (x^2 - 9) / (x - 3) approach as x approaches 3?",
     answer: "6",
+    choices: ["6", "3", "0", "9"],
     method: "Factoring",
   },
   {
     tier: "Medium",
-    prompt: "lim x->0 ((3x^2 + 6x) / x)",
-    answer: "6",
-    method: "Factoring",
+    prompt: "Is f(x) continuous at x = 2 if f(x) = x^2 + 1 for x < 2, f(2) = 5, and f(x) = 2x + 1 for x > 2?",
+    answer: "Yes",
+    answers: ["Yes", "Continuous"],
+    choices: ["Yes", "No", "Continuous only from the left", "Continuous only from the right"],
+    method: "Piecewise Continuity",
   },
   {
     tier: "Medium",
-    prompt: "lim x->0 ((sqrt(x + 9) - 3) / x)",
-    answer: "1/6",
-    method: "Rationalization",
+    prompt: "At x = 2, does the limit of f(x) exist if f(x) = 2x + 1 for x < 2 and f(x) = x + 3 for x >= 2?",
+    answer: "Yes",
+    answers: ["Yes", "Exists", "The limit exists"],
+    choices: ["Yes", "No", "Only the left-hand limit", "Only the right-hand limit"],
+    method: "Piecewise Limits",
   },
   {
     tier: "Medium",
-    prompt: "lim x->2 ((x^2 - 4) / (x - 2))",
-    answer: "4",
+    prompt: "Given f(x) = 10 / (x - 2), find lim x->2 f(x). Does it exist?",
+    answer: "DNE",
+    answers: ["DNE", "Does not exist", "The limit does not exist"],
+    choices: ["DNE", "0", "+Infinity", "-Infinity"],
+    method: "Infinite One-Sided Limits",
+  },
+  {
+    tier: "Medium",
+    prompt: "Find lim x->2 ((x^3 - 8) / (x - 2)).",
+    answer: "12",
+    choices: ["12", "8", "6", "4"],
     method: "Factoring",
   },
   {
     tier: "Hard",
-    prompt: "lim x->0 (sin x / x)",
-    answer: "1",
-    method: "Special Limit",
+    prompt: "Find k so f(x) is continuous at x = 3, where f(x) = (x^2 - 9) / (x - 3) for x < 3, f(3) = k, and f(x) = x + 3 for x > 3.",
+    answer: "6",
+    choices: ["6", "3", "9", "12"],
+    method: "Piecewise Continuity",
   },
   {
     tier: "Hard",
-    prompt: "lim x->1 ((x^3 - 1) / (x - 1))",
+    prompt: "Find a so the limit exists at x = 3, where f(x) = ax + 1 for x < 3 and f(x) = 2x + 4 for x >= 3.",
     answer: "3",
-    method: "Factoring",
+    choices: ["3", "2", "6", "9"],
+    method: "Matching One-Sided Limits",
   },
   {
     tier: "Hard",
-    prompt: "lim x->0+ (1 / x)",
-    answer: "Infinity",
-    method: "One-Sided Limit",
+    prompt: "Find lim x->5- (e^x / (x - 5)^3).",
+    answer: "-Infinity",
+    answers: ["-Infinity", "-Inf", "Negative infinity", "-∞"],
+    choices: ["-Infinity", "+Infinity", "0", "DNE"],
+    method: "Infinite Limit",
   },
   {
     tier: "Hard",
-    prompt: "lim x->0 ((1 - cos x) / x^2)",
-    answer: "1/2",
-    method: "Special Limit",
+    prompt: "Simplify lim x->0 ((sqrt(x + 9) - 3) / x).",
+    answer: "1/6",
+    choices: ["1/6", "1/3", "1/9", "6"],
+    method: "Rationalization",
   },
 ];
 
@@ -294,8 +313,8 @@ let musicStep = 0;
 let musicMode = "menu";
 let toastTimer = null;
 let lobbyMode = null;
-let localPlayerName = sessionStorage.getItem("league-player-name") || "Player 1";
-let lobbyPlayers = [localPlayerName, null, null, null];
+let localPlayerName = "";
+let lobbyPlayers = ["Player 1", null, null, null];
 let npcTimeout = null;
 let turnAdvanceTimeout = null;
 let rollCountdownTimer = null;
@@ -307,12 +326,15 @@ let roomPlayers = [];
 let roomSeatPlayerIds = [];
 let roomSyncTimer = null;
 let namePresenceTimer = null;
+let localPresenceJoinedAt = Date.now();
 let matchStartedAt = 0;
 let gameOverShown = false;
 let isApplyingRoomState = false;
 const rematchVotes = new Set();
 const localRoomPlayerId = sessionStorage.getItem("league-player-id") || crypto.randomUUID();
 sessionStorage.setItem("league-player-id", localRoomPlayerId);
+const localDeviceId = localStorage.getItem("league-device-id") || crypto.randomUUID();
+localStorage.setItem("league-device-id", localDeviceId);
 
 const turnState = {
   orderedPlayerIds: [],
@@ -615,6 +637,26 @@ function replaceDisconnectedPlayersWithNpcs() {
   }
 }
 
+function handleMatchDeparture(roomPlayerId) {
+  if (!isRoomHost || lobbyMode !== "friends") return;
+  const npcName = replaceRoomSeatWithNpc(roomPlayerId);
+  if (!npcName) return;
+
+  if (turnState.isMatchOver) {
+    renderRematchVote();
+    showToast(`${npcName} will take the empty seat next match.`, "info");
+    if (!maybeStartMultiplayerRematch()) broadcastRoomState();
+    return;
+  }
+
+  setFeedback("A player left the match", `${npcName} has taken over their seat.`);
+  showToast(`${npcName} has taken over the empty seat.`, "info");
+  renderAll();
+  broadcastRoomState();
+
+  if (isNpcPlayer(getActivePlayer()) && !turnState.isResolving) scheduleNpcTurn();
+}
+
 function resumeAuthoritativeTurn() {
   if (!isRoomHost || turnState.isMatchOver) return;
   const remaining = Number.parseInt(timerDisplayElement.textContent.match(/\d+/)?.[0] || "0", 10);
@@ -673,6 +715,11 @@ function handleGuestAction(payload) {
     return;
   }
 
+  if (action === "match_leave") {
+    handleMatchDeparture(payload.playerId);
+    return;
+  }
+
   const expectedPlayer = action === "roll" ? getRollingPlayer() : activePlayer;
 
   if (!requestingPlayer || requestingPlayer.id !== expectedPlayer?.id || turnState.isResolving) return;
@@ -691,11 +738,30 @@ function shuffle(items) {
   const shuffled = [...items];
 
   for (let index = shuffled.length - 1; index > 0; index -= 1) {
-    const randomIndex = Math.floor(Math.random() * (index + 1));
+    const randomIndex = getRandomIndex(index + 1);
     [shuffled[index], shuffled[randomIndex]] = [shuffled[randomIndex], shuffled[index]];
   }
 
   return shuffled;
+}
+
+function getRandomIndex(length) {
+  if (length <= 1) return 0;
+
+  if (window.crypto?.getRandomValues) {
+    const values = new Uint32Array(1);
+    const maximum = Math.floor(0x100000000 / length) * length;
+    let value;
+
+    do {
+      window.crypto.getRandomValues(values);
+      value = values[0];
+    } while (value >= maximum);
+
+    return value % length;
+  }
+
+  return Math.floor(Math.random() * length);
 }
 
 function rollDie() {
@@ -827,15 +893,16 @@ function startRollCountdown() {
 }
 
 function createDeck() {
-  const cards = Array.from({ length: 10 }, (_, index) => ({
+  const cards = Array.from({ length: 12 }, (_, index) => ({
     id: `question-${index + 1}`,
     type: "question",
     title: "Question",
     image: imagePaths.questionBack,
   }));
 
-  actionTypes.forEach((action) => {
-    for (let copy = 1; copy <= 3; copy += 1) {
+  const actionCardCopies = [3, 3, 2, 2];
+  actionTypes.forEach((action, actionIndex) => {
+    for (let copy = 1; copy <= actionCardCopies[actionIndex]; copy += 1) {
       cards.push({
         id: `${action.id}-${copy}`,
         type: "action",
@@ -900,11 +967,11 @@ function resetGame(playerNames = getJoinedLobbyPlayers()) {
   gameOverShown = false;
   rematchVotes.clear();
   if (gameOverModal.open) gameOverModal.close();
-  players.forEach((player) => {
-    for (let count = 0; count < 3; count += 1) {
+  for (let round = 0; round < 3; round += 1) {
+    players.forEach((player) => {
       player.hand.push(deck.pop());
-    }
-  });
+    });
+  }
   setFeedback("Roll the dice", "Lowest roll goes first.");
   renderAll();
   startRollCountdown();
@@ -1070,7 +1137,7 @@ function playSelectedCard(index) {
   }
   const activePlayer = getActivePlayer();
 
-  if (turnState.isResolving || turnState.isChoosingDrawnCard || !activePlayer || !activePlayer.hand[index] || currentCard || turnState.hasDrawn) {
+  if (!turnState.isStarted || turnState.isRolling || turnState.isMatchOver || turnState.isResolving || turnState.isChoosingDrawnCard || !activePlayer || !activePlayer.hand[index] || currentCard || turnState.hasDrawn) {
     return;
   }
 
@@ -1101,7 +1168,11 @@ function chooseQuestionDifficulty(tierName) {
   }
   const question = availableQuestions[Math.floor(Math.random() * availableQuestions.length)];
   usedQuestionPrompts.add(question.prompt);
-  Object.assign(currentCard, question, { difficulty: tierName, isRevealed: true });
+  Object.assign(currentCard, question, {
+    difficulty: tierName,
+    isRevealed: true,
+    answerChoices: shuffle(question.choices || [question.answer]),
+  });
   startTimer(getTierByName(tierName).timeLimit, "answer");
   setFeedback(`${tierName} question`, "Solve it before the timer ends.");
   renderAll();
@@ -1268,12 +1339,24 @@ function submitAnswer(event) {
   submitAnswerValue(submittedAnswer);
 }
 
+function chooseMultipleChoiceAnswer(answer) {
+  if (turnState.isResolving || !currentCard?.isRevealed) return;
+
+  if (isFriendsGuest()) {
+    requestHostAction("answer", { answer });
+    return;
+  }
+
+  submitAnswerValue(answer);
+}
+
 function submitAnswerValue(answer) {
   if (!currentCard || turnState.isResolving) return;
   const submittedAnswer = normalizeAnswer(answer);
-  const correctAnswer = normalizeAnswer(currentCard.answer);
+  const acceptedAnswers = currentCard.answers || [currentCard.answer];
+  const isCorrect = acceptedAnswers.some((acceptedAnswer) => submittedAnswer === normalizeAnswer(acceptedAnswer));
 
-  if (submittedAnswer === correctAnswer) {
+  if (isCorrect) {
     answerCorrect();
     return;
   }
@@ -1468,17 +1551,19 @@ async function returnToLobbyFromGameOver() {
       await sendRoomEvent("player_action", { action: "rematch_leave", playerId: localRoomPlayerId });
     }
     await leaveRealtimeRoom();
-    lobbyMode = null;
-    lobbyPlayers = [localPlayerName, null, null, null];
-    invitePanel.hidden = true;
   }
 
+  clearExitedMatchState();
+  lobbyMode = null;
+  lobbyPlayers = [localPlayerName || "Player 1", null, null, null];
+  invitePanel.hidden = true;
   if (gameOverModal.open) gameOverModal.close();
   gameScreen.hidden = true;
   lobbyScreen.hidden = false;
   document.body.classList.remove("is-match", "is-roll-phase");
   clearNpcTimeout();
   clearTurnAdvanceTimeout();
+  renderLobby();
   clearRollCountdown();
   stopTimer();
   syncBackgroundMusic();
@@ -1923,7 +2008,9 @@ function renderDiceRollPanel() {
 }
 
 function renderLobby() {
-  if (document.activeElement !== playerNameInput) playerNameInput.value = localPlayerName;
+  const localSeatIndex = roomPlayers.findIndex((presence) => presence.playerId === localRoomPlayerId);
+  const defaultLocalName = localSeatIndex >= 0 ? `Player ${localSeatIndex + 1}` : "Player 1";
+  if (document.activeElement !== playerNameInput) playerNameInput.value = localPlayerName || defaultLocalName;
   joinRoomForm.hidden = lobbyMode !== "friends";
   lobbySlotsElement.innerHTML = lobbyPlayers
     .map((playerName, index) => `
@@ -1961,9 +2048,22 @@ function getPresencePlayers() {
     return [];
   }
 
-  return Object.values(roomChannel.presenceState())
+  const presenceEntries = Object.values(roomChannel.presenceState())
     .flat()
-    .filter((presence) => presence.playerId)
+    .filter((presence) => presence.playerId);
+  const latestPresenceByIdentity = new Map();
+
+  presenceEntries.forEach((presence) => {
+    const identityKey = presence.deviceId || presence.playerId;
+    const existing = latestPresenceByIdentity.get(identityKey);
+    const existingUpdatedAt = Number(existing?.nameUpdatedAt || existing?.joinedAt || 0);
+    const nextUpdatedAt = Number(presence.nameUpdatedAt || presence.joinedAt || 0);
+    if (!existing || (!existing.isHost && presence.isHost) || (!existing.isHost && nextUpdatedAt >= existingUpdatedAt)) {
+      latestPresenceByIdentity.set(identityKey, presence);
+    }
+  });
+
+  return [...latestPresenceByIdentity.values()]
     .sort((a, b) => Number(b.isHost) - Number(a.isHost) || a.joinedAt - b.joinedAt)
     .slice(0, 4);
 }
@@ -1973,13 +2073,13 @@ function sanitizePlayerName(value) {
     .replace(/[^\p{L}\p{N} _'-]/gu, "")
     .trim()
     .replace(/\s+/g, " ")
-    .slice(0, 18) || "Player";
+    .slice(0, 18);
 }
 
 function syncLobbyNamesFromPresence() {
   lobbyPlayers = Array.from({ length: 4 }, (_, index) => {
     const presence = roomPlayers[index];
-    return presence ? sanitizePlayerName(presence.name || `Player ${index + 1}`) : null;
+    return presence ? sanitizePlayerName(presence.name) || `Player ${index + 1}` : null;
   });
 }
 
@@ -1987,9 +2087,11 @@ async function updateLocalPresenceName() {
   if (!roomChannel) return;
   await roomChannel.track({
     playerId: localRoomPlayerId,
-    name: localPlayerName,
+    deviceId: localDeviceId,
+    name: localPlayerName || null,
     isHost: isRoomHost,
-    joinedAt: roomPlayers.find((presence) => presence.playerId === localRoomPlayerId)?.joinedAt || Date.now(),
+    joinedAt: localPresenceJoinedAt,
+    nameUpdatedAt: Date.now(),
   });
 }
 
@@ -2006,6 +2108,28 @@ async function leaveRealtimeRoom() {
   isRoomHost = false;
 }
 
+function clearExitedMatchState() {
+  clearNpcTimeout();
+  clearTurnAdvanceTimeout();
+  clearRollCountdown();
+  stopTimer();
+  players = [];
+  deck = [];
+  discardPile = [];
+  placements = [];
+  currentCard = null;
+  selectedHandIndex = -1;
+  usedQuestionPrompts.clear();
+  rematchVotes.clear();
+  turnState.isStarted = false;
+  turnState.isRolling = false;
+  turnState.isMatchOver = false;
+  turnState.isResolving = false;
+  turnState.isChoosingDrawnCard = false;
+  turnState.hasDrawn = false;
+  turnState.pendingAttackDamage = 0;
+}
+
 async function connectToRoom(code, hostRoom = false) {
   if (!realtimeClient) {
     lobbyStatusElement.textContent = "Could not load the multiplayer connection. Check your internet connection.";
@@ -2014,6 +2138,7 @@ async function connectToRoom(code, hostRoom = false) {
 
   await leaveRealtimeRoom();
   roomCode = code.toUpperCase();
+  localPresenceJoinedAt = Date.now();
   const roomUrl = new URL(location.href);
   roomUrl.searchParams.set("room", roomCode);
   history.replaceState({}, "", roomUrl);
@@ -2076,9 +2201,11 @@ async function connectToRoom(code, hostRoom = false) {
       if (status === "SUBSCRIBED") {
         await roomChannel.track({
           playerId: localRoomPlayerId,
-          name: localPlayerName,
+          deviceId: localDeviceId,
+          name: localPlayerName || null,
           isHost: isRoomHost,
-          joinedAt: Date.now(),
+          joinedAt: localPresenceJoinedAt,
+          nameUpdatedAt: localPresenceJoinedAt,
         });
         if (!isRoomHost) sendRoomEvent("state_request", { playerId: localRoomPlayerId });
         return;
@@ -2096,7 +2223,7 @@ function selectNpcMode() {
   url.searchParams.delete("room");
   history.replaceState({}, "", url);
   lobbyMode = "npc";
-  lobbyPlayers = [localPlayerName, "NPC 1", "NPC 2", "NPC 3"];
+  lobbyPlayers = [localPlayerName || "Player 1", "NPC 1", "NPC 2", "NPC 3"];
   invitePanel.hidden = true;
   renderLobby();
 }
@@ -2145,7 +2272,7 @@ function renderTable() {
   const handCards = bottomPlayer
     ? bottomPlayer.hand
       .map((card, index) => `
-        <button class="hand-card ${card.type}${index >= 6 ? " is-overflow" : ""}${activePlayer && bottomPlayer.id === activePlayer.id && index === selectedHandIndex ? " is-selected" : ""}" style="--hand-index:${index};--overflow-index:${Math.max(0, index - 6)};--deal-delay:${index * 55}ms" type="button" data-hand-index="${index}" ${activePlayer && bottomPlayer.id === activePlayer.id && !turnState.hasDrawn && !turnState.isResolving && !currentCard ? "" : "disabled"}>
+        <button class="hand-card ${card.type}${index >= 6 ? " is-overflow" : ""}${activePlayer && bottomPlayer.id === activePlayer.id && index === selectedHandIndex ? " is-selected" : ""}" style="--hand-index:${index};--overflow-index:${Math.max(0, index - 6)};--deal-delay:${index * 55}ms" type="button" data-hand-index="${index}" ${turnState.isStarted && !turnState.isRolling && activePlayer && bottomPlayer.id === activePlayer.id && !turnState.hasDrawn && !turnState.isResolving && !currentCard ? "" : "disabled"}>
           <img src="${card.image}" alt="${card.title || "Question"} card">
           <span>${card.title || "Question"}</span>
         </button>
@@ -2153,15 +2280,21 @@ function renderTable() {
       .join("")
     : "";
   const canControlCurrentTurn = Boolean(activePlayer && bottomPlayer && activePlayer.id === bottomPlayer.id && !isNpcPlayer(activePlayer));
-  const canPlayHand = Boolean(canControlCurrentTurn && !turnState.hasDrawn && !turnState.isResolving && !turnState.isChoosingDrawnCard && !currentCard);
+  const canPlayHand = Boolean(turnState.isStarted && !turnState.isRolling && !turnState.isMatchOver && canControlCurrentTurn && !turnState.hasDrawn && !turnState.isResolving && !turnState.isChoosingDrawnCard && !currentCard);
   const canAnswerCurrentCard = Boolean(currentCard?.isRevealed && canControlCurrentTurn);
-  const answerForm = canAnswerCurrentCard
+  const answerChoices = canAnswerCurrentCard
     ? `
-      <form class="answer-form">
-        <label for="answer-input">Your answer</label>
-        <input id="answer-input" name="answer" type="text" autocomplete="off" placeholder="Type the answer..." required>
-        <button type="submit" ${turnState.isResolving ? "disabled" : ""}>Submit answer</button>
-      </form>
+      <div class="answer-choices" role="group" aria-label="Choose your answer">
+        <span class="answer-choices-title">Choose your answer</span>
+        <div class="answer-choice-grid">
+          ${(currentCard.answerChoices || [currentCard.answer]).map((choice, index) => `
+            <button type="button" data-answer-choice="${encodeURIComponent(choice)}" ${turnState.isResolving ? "disabled" : ""}>
+              <span>${String.fromCharCode(65 + index)}</span>
+              <strong>${choice}</strong>
+            </button>
+          `).join("")}
+        </div>
+      </div>
     `
     : "";
 
@@ -2261,7 +2394,7 @@ function renderTable() {
           <p class="card-label action-label">${currentCard.difficulty}</p>
           <h4>${currentCard.prompt}</h4>
           <p class="method-note"><span>Suggested method</span>${currentCard.method}</p>
-          ${isNpcPlayer(activePlayer) ? `<p class="solver-status">${activePlayer.name} is calculating...</p>` : answerForm}
+          ${isNpcPlayer(activePlayer) ? `<p class="solver-status">${activePlayer.name} is calculating...</p>` : answerChoices}
         </div>
       </article>
     ` : difficultyPicker || targetPicker)
@@ -2270,8 +2403,10 @@ function renderTable() {
   if (currentCardElement._renderedHtml !== currentCardHtml) {
     currentCardElement.innerHTML = currentCardHtml;
     currentCardElement._renderedHtml = currentCardHtml;
-    currentCardElement.querySelector(".answer-form")?.addEventListener("submit", submitAnswer);
-    currentCardElement.querySelector(".answer-form input")?.focus();
+    currentCardElement.querySelectorAll("[data-answer-choice]").forEach((button) => button.addEventListener("click", () => {
+      playSound("select");
+      chooseMultipleChoiceAnswer(decodeURIComponent(button.dataset.answerChoice));
+    }));
     currentCardElement.querySelectorAll("[data-tier]").forEach((button) => button.addEventListener("click", () => chooseQuestionDifficulty(button.dataset.tier)));
     currentCardElement.querySelectorAll("[data-target-id]").forEach((button) => button.addEventListener("click", () => playActionCard(Number(button.dataset.targetId))));
     currentCardElement.querySelectorAll("[data-draw-choice]").forEach((button) => button.addEventListener("click", () => resolveDrawChoice(button.dataset.drawChoice === "use")));
@@ -2394,21 +2529,25 @@ howToPlayModal.addEventListener("click", (event) => {
 backButton.addEventListener("click", async () => {
   if (lobbyMode === "friends" && roomChannel) {
     if (isRoomHost) {
+      handleMatchDeparture(localRoomPlayerId);
       const successor = roomPlayers.find((presence) => presence.playerId !== localRoomPlayerId);
       if (successor) {
         await sendRoomEvent("host_transfer", { successorId: successor.playerId, state: buildRoomState() });
       }
+    } else {
+      await sendRoomEvent("player_action", { action: "match_leave", playerId: localRoomPlayerId });
     }
     await leaveRealtimeRoom();
   }
+  clearExitedMatchState();
+  lobbyMode = null;
+  lobbyPlayers = [localPlayerName || "Player 1", null, null, null];
+  invitePanel.hidden = true;
   gameScreen.hidden = true;
   lobbyScreen.hidden = false;
   document.body.classList.remove("is-match");
   document.body.classList.remove("is-roll-phase");
-  clearNpcTimeout();
-  clearTurnAdvanceTimeout();
-  clearRollCountdown();
-  stopTimer();
+  renderLobby();
   syncBackgroundMusic();
 });
 
@@ -2450,6 +2589,12 @@ joinRoomForm.addEventListener("submit", async (event) => {
     return;
   }
 
+  if (roomChannel && code === roomCode) {
+    lobbyStatusElement.textContent = `You are already seated at table ${code}.`;
+    roomCodeInput.value = "";
+    return;
+  }
+
   roomCodeInput.disabled = true;
   joinRoomForm.querySelector("button").disabled = true;
   lobbyStatusElement.textContent = `Joining table ${code}...`;
@@ -2460,25 +2605,28 @@ joinRoomForm.addEventListener("submit", async (event) => {
 
 playerNameInput.addEventListener("input", () => {
   localPlayerName = sanitizePlayerName(playerNameInput.value);
-  sessionStorage.setItem("league-player-name", localPlayerName);
 
   if (lobbyMode === "npc") {
-    lobbyPlayers[0] = localPlayerName;
+    lobbyPlayers[0] = localPlayerName || "Player 1";
     renderLobby();
   } else if (lobbyMode === "friends" && roomChannel) {
     window.clearTimeout(namePresenceTimer);
     namePresenceTimer = window.setTimeout(updateLocalPresenceName, 250);
   } else {
-    lobbyPlayers[0] = localPlayerName;
+    lobbyPlayers[0] = localPlayerName || "Player 1";
     renderLobby();
   }
 });
 
 playerNameInput.addEventListener("change", () => {
   localPlayerName = sanitizePlayerName(playerNameInput.value);
-  playerNameInput.value = localPlayerName;
-  sessionStorage.setItem("league-player-name", localPlayerName);
+  const localSeatIndex = roomPlayers.findIndex((presence) => presence.playerId === localRoomPlayerId);
+  playerNameInput.value = localPlayerName || `Player ${localSeatIndex >= 0 ? localSeatIndex + 1 : 1}`;
   if (lobbyMode === "friends") updateLocalPresenceName();
+});
+
+playerNameInput.addEventListener("focus", () => {
+  if (!localPlayerName) playerNameInput.select();
 });
 
 function syncFullscreenButton() {

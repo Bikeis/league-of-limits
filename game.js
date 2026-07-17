@@ -9,6 +9,28 @@ document.documentElement.dataset.multiplayerBuild = MULTIPLAYER_BUILD;
 const startScreen = document.querySelector("#start-screen");
 const lobbyScreen = document.querySelector("#lobby-screen");
 const gameScreen = document.querySelector("#game-screen");
+const DESKTOP_STAGE_WIDTH = 2560;
+const DESKTOP_STAGE_HEIGHT = 1440;
+
+function syncDesktopGameStage() {
+  if (window.innerWidth <= 760) {
+    gameScreen.style.removeProperty("--game-stage-scale");
+    gameScreen.style.removeProperty("--game-stage-left");
+    gameScreen.style.removeProperty("--game-stage-top");
+    return;
+  }
+
+  const scale = Math.min(
+    window.innerWidth / DESKTOP_STAGE_WIDTH,
+    window.innerHeight / DESKTOP_STAGE_HEIGHT,
+  );
+  const horizontalOffset = (window.innerWidth - DESKTOP_STAGE_WIDTH * scale) / (2 * scale);
+  const verticalOffset = (window.innerHeight - DESKTOP_STAGE_HEIGHT * scale) / (2 * scale);
+
+  gameScreen.style.setProperty("--game-stage-scale", scale.toFixed(4));
+  gameScreen.style.setProperty("--game-stage-left", `${horizontalOffset}px`);
+  gameScreen.style.setProperty("--game-stage-top", `${verticalOffset}px`);
+}
 const startButton = document.querySelector("#start-button");
 const howToPlayButton = document.querySelector("#how-to-play-button");
 const howToPlayModal = document.querySelector("#how-to-play-modal");
@@ -2207,6 +2229,7 @@ document.addEventListener("pointerover", (event) => {
 
 document.addEventListener("pointerdown", unlockAudio, { once: true });
 document.addEventListener("keydown", unlockAudio, { once: true });
+window.addEventListener("resize", syncDesktopGameStage);
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
     if (musicTimer) window.clearInterval(musicTimer);
@@ -2229,3 +2252,4 @@ renderDifficultyTiers();
 renderRules();
 renderConcepts();
 renderAudioSettings();
+syncDesktopGameStage();

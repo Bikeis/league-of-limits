@@ -255,6 +255,15 @@
           <div id="final-standings-list" class="final-standings-list"></div>
         </section>
 
+        <section id="rematch-vote-panel" class="rematch-vote-panel" aria-live="polite" hidden>
+          <div class="rematch-vote-heading">
+            <span>Rematch oath</span>
+            <strong><b id="rematch-vote-count">0</b>/<b id="rematch-vote-required">0</b></strong>
+          </div>
+          <p id="rematch-vote-status">Every player must agree before the next match begins.</p>
+          <div class="rematch-vote-track" aria-hidden="true"><i id="rematch-vote-fill"></i></div>
+        </section>
+
         <div class="game-over-actions">
           <button id="play-again-button" class="play-again-button" type="button"><span aria-hidden="true">↻</span> Play Again</button>
           <button id="game-over-lobby-button" class="game-over-lobby-button" type="button">Return to Lobby</button>

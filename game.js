@@ -3,14 +3,14 @@
 const SUPABASE_URL = "https://wnbxdoesaaafesvpkbvv.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_DbsYeFZT8kQdY4euO5PSTw_c8566AiQ";
 const realtimeClient = window.supabase?.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY) || null;
-const MULTIPLAYER_BUILD = "ui-10";
+const MULTIPLAYER_BUILD = "ui-13";
 document.documentElement.dataset.multiplayerBuild = MULTIPLAYER_BUILD;
 
 const startScreen = document.querySelector("#start-screen");
 const lobbyScreen = document.querySelector("#lobby-screen");
 const gameScreen = document.querySelector("#game-screen");
-const DESKTOP_STAGE_WIDTH = 2560;
-const DESKTOP_STAGE_HEIGHT = 1440;
+const DESKTOP_STAGE_WIDTH = 2304;
+const DESKTOP_STAGE_HEIGHT = 1296;
 
 function syncDesktopGameStage() {
   if (window.innerWidth <= 760) {
@@ -42,6 +42,9 @@ const friendsModeButton = document.querySelector("#friends-mode-button");
 const startMatchButton = document.querySelector("#start-match-button");
 const lobbyStatusElement = document.querySelector("#lobby-status");
 const lobbySlotsElement = document.querySelector("#lobby-slots");
+const playerNameInput = document.querySelector("#player-name-input");
+const joinRoomForm = document.querySelector("#join-room-form");
+const roomCodeInput = document.querySelector("#room-code-input");
 const invitePanel = document.querySelector("#invite-panel");
 const inviteLinkInput = document.querySelector("#invite-link");
 const copyLinkButton = document.querySelector("#copy-link-button");
@@ -57,6 +60,7 @@ const rulesListElement = document.querySelector("#rules-list");
 const conceptListElement = document.querySelector("#concept-list");
 const toastElement = document.querySelector("#toast");
 const settingsButton = document.querySelector("#settings-button");
+const fullscreenButton = document.querySelector("#fullscreen-button");
 const menuSettingsButton = document.querySelector("#menu-settings-button");
 const settingsModal = document.querySelector("#settings-modal");
 const muteButton = document.querySelector("#mute-button");
@@ -243,15 +247,15 @@ const questionBank = [
 const gameRules = [
   {
     title: "Choose your move",
-    description: "On your first turn, draw one card. After that, either draw one card or play one from your hand.",
+    description: "From the first turn onward, play a starting card or draw one from the shared deck.",
   },
   {
-    title: "Drawing ends the turn",
-    description: "Build your hand for later, or spend your turn playing a question or action card.",
+    title: "Use it or keep it",
+    description: "A drawn card can be used immediately. Keeping it saves the card for later and ends your turn.",
   },
   {
     title: "Resolve its effect",
-    description: "Choose question difficulty and solve it, or select a target for your action card.",
+    description: "Choose question difficulty and solve it, then select who to attack. Action cards also let you choose their target.",
   },
   {
     title: "Build the played pile",
@@ -290,7 +294,8 @@ let musicStep = 0;
 let musicMode = "menu";
 let toastTimer = null;
 let lobbyMode = null;
-let lobbyPlayers = ["Player 1", null, null, null];
+let localPlayerName = sessionStorage.getItem("league-player-name") || "Player 1";
+let lobbyPlayers = [localPlayerName, null, null, null];
 let npcTimeout = null;
 let turnAdvanceTimeout = null;
 let rollCountdownTimer = null;
@@ -301,6 +306,7 @@ let isRoomHost = false;
 let roomPlayers = [];
 let roomSeatPlayerIds = [];
 let roomSyncTimer = null;
+let namePresenceTimer = null;
 let matchStartedAt = 0;
 let gameOverShown = false;
 let isApplyingRoomState = false;
@@ -318,6 +324,8 @@ const turnState = {
   isMatchOver: false,
   hasDrawn: false,
   isResolving: false,
+  isChoosingDrawnCard: false,
+  pendingAttackDamage: 0,
 };
 
 const DRAW_TIME_LIMIT = 12;
@@ -526,6 +534,7 @@ function applyRoomState(state) {
   if (!state || isRoomHost) return;
   isApplyingRoomState = true;
   const wasRollPhase = !turnState.isStarted;
+  const isStartingRematch = turnState.isMatchOver && state.turnState && !state.turnState.isMatchOver;
   if (state.turnState?.isStarted || state.players?.length) {
     lobbyScreen.hidden = true;
     gameScreen.hidden = false;
@@ -547,6 +556,10 @@ function applyRoomState(state) {
   (state.rematchVotes || []).forEach((playerId) => rematchVotes.add(playerId));
   const shouldShowGameOver = Boolean(state.turnState?.isMatchOver && !gameOverShown);
   Object.assign(turnState, state.turnState || {});
+  if (isStartingRematch) {
+    gameOverShown = false;
+    if (gameOverModal.open) gameOverModal.close();
+  }
   usedQuestionPrompts = new Set(state.usedQuestionPrompts || []);
   feedbackElement.innerHTML = state.feedbackHtml || "";
   if (wasRollPhase && !turnState.isStarted) {
@@ -667,8 +680,10 @@ function handleGuestAction(payload) {
   if (action === "roll") rollTurnOrder();
   if (action === "draw") drawCard();
   if (action === "play_card") playSelectedCard(Number(data.index));
+  if (action === "draw_choice") resolveDrawChoice(Boolean(data.useCard));
   if (action === "difficulty") chooseQuestionDifficulty(String(data.tier));
   if (action === "target") playActionCard(Number(data.targetId));
+  if (action === "question_attack") playQuestionAttack(Number(data.targetId));
   if (action === "answer") submitAnswerValue(String(data.answer || ""));
 }
 
@@ -839,6 +854,7 @@ function createPlayers(names) {
   return names.map((name, index) => ({
     id: index + 1,
     name,
+    isNpc: lobbyMode === "npc" ? index > 0 : lobbyMode === "friends" ? !roomSeatPlayerIds[index] : false,
     health: MAX_HEALTH,
     calculusPoints: 0,
     hand: [],
@@ -877,6 +893,8 @@ function resetGame(playerNames = getJoinedLobbyPlayers()) {
   turnState.isMatchOver = false;
   turnState.hasDrawn = false;
   turnState.isResolving = false;
+  turnState.isChoosingDrawnCard = false;
+  turnState.pendingAttackDamage = 0;
   usedQuestionPrompts = new Set();
   matchStartedAt = Date.now();
   gameOverShown = false;
@@ -994,18 +1012,55 @@ function drawCard() {
   }
 
   const card = deck.pop();
-  turnState.isResolving = true;
   activePlayer.hand.push(card);
   turnState.hasDrawn = true;
+  turnState.isResolving = false;
+  turnState.isChoosingDrawnCard = true;
+  selectedHandIndex = activePlayer.hand.length - 1;
+  currentCard = card;
   document.body.classList.add("card-drawn");
   window.setTimeout(() => document.body.classList.remove("card-drawn"), 500);
-  feedbackElement.textContent = `${activePlayer.name} drew a ${card.type} card. Choose a card from your hand.`;
+  feedbackElement.textContent = `${activePlayer.name} drew a ${card.type} card. Use it now or keep it for later.`;
   if (isLocalHumanPlayer(activePlayer)) {
     showToast(`${card.type === "question" ? "Question card" : card.title} added to your hand.`, "private");
     playSound("draw");
   }
   renderAll();
-  scheduleAutoAdvance();
+  startTimer(CHOICE_TIME_LIMIT, "choose");
+
+  if (isNpcPlayer(activePlayer)) {
+    npcTimeout = window.setTimeout(() => resolveDrawChoice(Math.random() < 0.68), 1200);
+  }
+}
+
+function resolveDrawChoice(useCard) {
+  if (isFriendsGuest()) {
+    requestHostAction("draw_choice", { useCard });
+    return;
+  }
+  if (!turnState.isChoosingDrawnCard || !currentCard || selectedHandIndex < 0) return;
+
+  stopTimer();
+  turnState.isChoosingDrawnCard = false;
+
+  if (!useCard) {
+    const activePlayer = getActivePlayer();
+    currentCard = null;
+    selectedHandIndex = -1;
+    turnState.isResolving = true;
+    setFeedback(`${activePlayer.name} kept the card`, "It is ready for a future turn.");
+    showToast("Card kept for later.", "private");
+    renderAll();
+    scheduleAutoAdvance();
+    return;
+  }
+
+  turnState.isResolving = false;
+  setFeedback(currentCard.type === "question" ? "Use drawn question" : `Use ${currentCard.title}`, currentCard.type === "question" ? "Choose a difficulty." : "Choose a target.");
+  renderAll();
+  startTimer(CHOICE_TIME_LIMIT, "choose");
+
+  if (isNpcPlayer(getActivePlayer())) scheduleNpcCurrentCardResolution();
 }
 
 function playSelectedCard(index) {
@@ -1015,7 +1070,7 @@ function playSelectedCard(index) {
   }
   const activePlayer = getActivePlayer();
 
-  if (turnState.isResolving || !activePlayer || !activePlayer.hand[index] || currentCard || activePlayer.turnsTaken === 0 || turnState.hasDrawn) {
+  if (turnState.isResolving || turnState.isChoosingDrawnCard || !activePlayer || !activePlayer.hand[index] || currentCard || turnState.hasDrawn) {
     return;
   }
 
@@ -1139,18 +1194,51 @@ function answerCorrect() {
   turnState.isResolving = true;
   stopTimer();
   const activePlayer = getActivePlayer();
-  const target = getTargetPlayer();
   const card = removeCurrentCardFromHand();
   const tier = getTierByName(card.difficulty);
   const damage = activePlayer.doubleDamage ? tier.damage * 2 : tier.damage;
   activePlayer.doubleDamage = false;
   activePlayer.calculusPoints += tier.calculusPoints;
-  const damageDealt = damagePlayer(target, damage);
   discardUsedCard(card);
-  feedbackElement.textContent = `${activePlayer.name} answered correctly and earned ${tier.calculusPoints} CP.`;
-  showToast(`${activePlayer.name} answered correctly: +${tier.calculusPoints} CP and ${damageDealt} damage.`, "good");
+  turnState.pendingAttackDamage = damage;
+  feedbackElement.textContent = `${activePlayer.name} answered correctly and earned ${tier.calculusPoints} CP. Choose who to attack.`;
+  showToast(`${activePlayer.name} answered correctly: +${tier.calculusPoints} CP.`, "good");
   playSound("correct");
-  if (damageDealt > 0) window.setTimeout(() => playSound("damage"), 260);
+  checkWinConditions();
+
+  if (turnState.isMatchOver) {
+    turnState.pendingAttackDamage = 0;
+    renderAll();
+    return;
+  }
+
+  turnState.isResolving = false;
+  renderAll();
+  startTimer(CHOICE_TIME_LIMIT, "choose");
+
+  if (isNpcPlayer(activePlayer)) {
+    const target = getTargetPlayer();
+    npcTimeout = window.setTimeout(() => playQuestionAttack(target?.id), 1100);
+  }
+}
+
+function playQuestionAttack(targetId) {
+  if (isFriendsGuest()) {
+    requestHostAction("question_attack", { targetId });
+    return;
+  }
+
+  const activePlayer = getActivePlayer();
+  const target = players.find((player) => player.id === targetId);
+  if (turnState.isResolving || turnState.pendingAttackDamage <= 0 || !activePlayer || !target || target.id === activePlayer.id || target.isEliminated) return;
+
+  turnState.isResolving = true;
+  stopTimer();
+  const damageDealt = damagePlayer(target, turnState.pendingAttackDamage);
+  turnState.pendingAttackDamage = 0;
+  setFeedback(`${activePlayer.name} attacked ${target.name}`, `${damageDealt} damage dealt.`);
+  showToast(`${target.name} took ${damageDealt} damage.`, damageDealt > 0 ? "bad" : "info");
+  if (damageDealt > 0) playSound("damage");
   checkWinConditions();
   renderAll();
   scheduleAutoAdvance();
@@ -1320,6 +1408,7 @@ function replaceRoomSeatWithNpc(roomPlayerId) {
   if (seatIndex < 0 || !players[seatIndex]) return null;
   const player = players[seatIndex];
   player.name = `NPC ${seatIndex + 1}`;
+  player.isNpc = true;
   roomSeatPlayerIds[seatIndex] = null;
   rematchVotes.delete(roomPlayerId);
   return player.name;
@@ -1380,7 +1469,7 @@ async function returnToLobbyFromGameOver() {
     }
     await leaveRealtimeRoom();
     lobbyMode = null;
-    lobbyPlayers = ["Player 1", null, null, null];
+    lobbyPlayers = [localPlayerName, null, null, null];
     invitePanel.hidden = true;
   }
 
@@ -1452,6 +1541,8 @@ function nextTurn() {
   turnState.turnNumber += 1;
   turnState.hasDrawn = false;
   turnState.isResolving = false;
+  turnState.isChoosingDrawnCard = false;
+  turnState.pendingAttackDamage = 0;
   const nextPlayer = getActivePlayer();
   nextPlayer.shield = false;
   nextPlayer.doubleDamage = nextPlayer.doubleDamagePending;
@@ -1466,7 +1557,7 @@ function nextTurn() {
     npcTimeout = window.setTimeout(nextTurn, 1300);
     return;
   }
-  feedbackElement.textContent = `${getActivePlayer().name}'s turn. Draw a card.`;
+  feedbackElement.textContent = `${getActivePlayer().name}'s turn. Play from your hand or draw a card.`;
   renderAll();
   if (isLocalHumanPlayer(getActivePlayer())) {
     playSound("turn");
@@ -1481,9 +1572,7 @@ function startDrawTimer() {
   }
 
   const activePlayer = getActivePlayer();
-  const instruction = activePlayer.turnsTaken === 0
-    ? `First turn: draw a card within ${DRAW_TIME_LIMIT} seconds.`
-    : `Draw from the deck or play a card within ${DRAW_TIME_LIMIT} seconds.`;
+  const instruction = `Play from your hand or draw a card within ${DRAW_TIME_LIMIT} seconds.`;
   setFeedback(`${activePlayer.name}'s turn`, instruction);
   startTimer(DRAW_TIME_LIMIT, "draw");
 }
@@ -1500,7 +1589,7 @@ function drawTimerOut() {
   activePlayer.health = Math.max(0, activePlayer.health - 1);
   showToast(`${activePlayer.name} waited too long. -1 HP.`, "bad");
   playSound("timeout");
-  setFeedback("Turn missed", `${activePlayer.name} lost 1 HP for not drawing.`);
+  setFeedback("Turn missed", `${activePlayer.name} lost 1 HP for not choosing a move.`);
   checkWinConditions();
   renderAll();
   scheduleAutoAdvance();
@@ -1526,6 +1615,16 @@ function playTimerOut() {
 
 function choiceTimerOut() {
   const activePlayer = getActivePlayer();
+
+  if (turnState.pendingAttackDamage > 0) {
+    playQuestionAttack(getTargetPlayer()?.id);
+    return;
+  }
+
+  if (turnState.isChoosingDrawnCard) {
+    resolveDrawChoice(false);
+    return;
+  }
 
   if (!activePlayer || !currentCard || currentCard.isRevealed) {
     return;
@@ -1602,7 +1701,32 @@ function clearTurnAdvanceTimeout() {
 }
 
 function isNpcPlayer(player) {
-  return Boolean(player && player.name.startsWith("NPC"));
+  return Boolean(player?.isNpc);
+}
+
+function scheduleNpcCurrentCardResolution() {
+  clearNpcTimeout();
+  const npcPlayer = getActivePlayer();
+  const card = currentCard;
+  if (!isNpcPlayer(npcPlayer) || !card) return;
+
+  npcTimeout = window.setTimeout(() => {
+    if (getActivePlayer()?.id !== npcPlayer.id || currentCard !== card) return;
+
+    if (card.type === "action") {
+      const target = getTargetPlayer();
+      const targetId = card.actionId === "shield" || card.actionId === "double-damage" ? npcPlayer.id : target?.id;
+      if (targetId) playActionCard(targetId);
+      return;
+    }
+
+    const tierName = Math.random() < 0.5 ? "Easy" : Math.random() < 0.75 ? "Medium" : "Hard";
+    chooseQuestionDifficulty(tierName);
+    npcTimeout = window.setTimeout(() => {
+      const accuracy = npcAccuracyByTier[tierName] ?? 0.6;
+      if (Math.random() < accuracy) answerCorrect(); else answerWrong();
+    }, 2200);
+  }, 900);
 }
 
 function scheduleNpcTurn() {
@@ -1618,7 +1742,7 @@ function scheduleNpcTurn() {
   npcTimeout = window.setTimeout(() => {
     setFeedback(`${activePlayer.name} is choosing`, "Draw a new card or play from their hand?");
     const canDraw = deck.length > 0 || discardPile.length > 0;
-    const shouldDraw = canDraw && (activePlayer.turnsTaken === 0 || activePlayer.hand.length < 2 || Math.random() < 0.34);
+    const shouldDraw = canDraw && (activePlayer.hand.length < 2 || Math.random() < 0.34);
 
     if (shouldDraw) {
       npcTimeout = window.setTimeout(() => drawCard(), 1100);
@@ -1799,6 +1923,8 @@ function renderDiceRollPanel() {
 }
 
 function renderLobby() {
+  if (document.activeElement !== playerNameInput) playerNameInput.value = localPlayerName;
+  joinRoomForm.hidden = lobbyMode !== "friends";
   lobbySlotsElement.innerHTML = lobbyPlayers
     .map((playerName, index) => `
       <article class="lobby-slot${playerName ? " is-filled" : ""}" style="--slot-index:${index}">
@@ -1830,13 +1956,6 @@ function createRoomCode() {
   return crypto.randomUUID().replaceAll("-", "").slice(0, 8).toUpperCase();
 }
 
-function buildRoomLink(code) {
-  const url = new URL(location.href);
-  url.searchParams.set("room", code);
-  url.hash = "";
-  return url.href;
-}
-
 function getPresencePlayers() {
   if (!roomChannel) {
     return [];
@@ -1847,6 +1966,31 @@ function getPresencePlayers() {
     .filter((presence) => presence.playerId)
     .sort((a, b) => Number(b.isHost) - Number(a.isHost) || a.joinedAt - b.joinedAt)
     .slice(0, 4);
+}
+
+function sanitizePlayerName(value) {
+  return String(value || "")
+    .replace(/[^\p{L}\p{N} _'-]/gu, "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .slice(0, 18) || "Player";
+}
+
+function syncLobbyNamesFromPresence() {
+  lobbyPlayers = Array.from({ length: 4 }, (_, index) => {
+    const presence = roomPlayers[index];
+    return presence ? sanitizePlayerName(presence.name || `Player ${index + 1}`) : null;
+  });
+}
+
+async function updateLocalPresenceName() {
+  if (!roomChannel) return;
+  await roomChannel.track({
+    playerId: localRoomPlayerId,
+    name: localPlayerName,
+    isHost: isRoomHost,
+    joinedAt: roomPlayers.find((presence) => presence.playerId === localRoomPlayerId)?.joinedAt || Date.now(),
+  });
 }
 
 async function leaveRealtimeRoom() {
@@ -1870,10 +2014,13 @@ async function connectToRoom(code, hostRoom = false) {
 
   await leaveRealtimeRoom();
   roomCode = code.toUpperCase();
+  const roomUrl = new URL(location.href);
+  roomUrl.searchParams.set("room", roomCode);
+  history.replaceState({}, "", roomUrl);
   isRoomHost = hostRoom;
   lobbyMode = "friends";
   invitePanel.hidden = false;
-  inviteLinkInput.value = buildRoomLink(roomCode);
+  inviteLinkInput.value = roomCode;
   lobbyPlayers = ["Connecting...", null, null, null];
   renderLobby();
 
@@ -1887,13 +2034,13 @@ async function connectToRoom(code, hostRoom = false) {
   roomChannel
     .on("presence", { event: "sync" }, () => {
       roomPlayers = getPresencePlayers();
-      lobbyPlayers = Array.from({ length: 4 }, (_, index) => roomPlayers[index] ? `Player ${index + 1}` : null);
+      syncLobbyNamesFromPresence();
       renderLobby();
       replaceDisconnectedPlayersWithNpcs();
     })
     .on("presence", { event: "leave" }, () => {
       roomPlayers = getPresencePlayers();
-      lobbyPlayers = Array.from({ length: 4 }, (_, index) => roomPlayers[index] ? `Player ${index + 1}` : null);
+      syncLobbyNamesFromPresence();
       renderLobby();
       replaceDisconnectedPlayersWithNpcs();
     })
@@ -1929,6 +2076,7 @@ async function connectToRoom(code, hostRoom = false) {
       if (status === "SUBSCRIBED") {
         await roomChannel.track({
           playerId: localRoomPlayerId,
+          name: localPlayerName,
           isHost: isRoomHost,
           joinedAt: Date.now(),
         });
@@ -1944,8 +2092,11 @@ async function connectToRoom(code, hostRoom = false) {
 
 function selectNpcMode() {
   leaveRealtimeRoom();
+  const url = new URL(location.href);
+  url.searchParams.delete("room");
+  history.replaceState({}, "", url);
   lobbyMode = "npc";
-  lobbyPlayers = ["Player 1", "NPC 1", "NPC 2", "NPC 3"];
+  lobbyPlayers = [localPlayerName, "NPC 1", "NPC 2", "NPC 3"];
   invitePanel.hidden = true;
   renderLobby();
 }
@@ -1994,7 +2145,7 @@ function renderTable() {
   const handCards = bottomPlayer
     ? bottomPlayer.hand
       .map((card, index) => `
-        <button class="hand-card ${card.type}${index >= 6 ? " is-overflow" : ""}${activePlayer && bottomPlayer.id === activePlayer.id && index === selectedHandIndex ? " is-selected" : ""}" style="--hand-index:${index};--overflow-index:${Math.max(0, index - 6)};--deal-delay:${index * 55}ms" type="button" data-hand-index="${index}" ${activePlayer && bottomPlayer.id === activePlayer.id && activePlayer.turnsTaken > 0 && !turnState.hasDrawn && !turnState.isResolving && !currentCard ? "" : "disabled"}>
+        <button class="hand-card ${card.type}${index >= 6 ? " is-overflow" : ""}${activePlayer && bottomPlayer.id === activePlayer.id && index === selectedHandIndex ? " is-selected" : ""}" style="--hand-index:${index};--overflow-index:${Math.max(0, index - 6)};--deal-delay:${index * 55}ms" type="button" data-hand-index="${index}" ${activePlayer && bottomPlayer.id === activePlayer.id && !turnState.hasDrawn && !turnState.isResolving && !currentCard ? "" : "disabled"}>
           <img src="${card.image}" alt="${card.title || "Question"} card">
           <span>${card.title || "Question"}</span>
         </button>
@@ -2002,7 +2153,7 @@ function renderTable() {
       .join("")
     : "";
   const canControlCurrentTurn = Boolean(activePlayer && bottomPlayer && activePlayer.id === bottomPlayer.id && !isNpcPlayer(activePlayer));
-  const canPlayHand = Boolean(canControlCurrentTurn && activePlayer.turnsTaken > 0 && !turnState.hasDrawn && !turnState.isResolving && !currentCard);
+  const canPlayHand = Boolean(canControlCurrentTurn && !turnState.hasDrawn && !turnState.isResolving && !turnState.isChoosingDrawnCard && !currentCard);
   const canAnswerCurrentCard = Boolean(currentCard?.isRevealed && canControlCurrentTurn);
   const answerForm = canAnswerCurrentCard
     ? `
@@ -2093,8 +2244,16 @@ function renderTable() {
     ? `<div class="choice-panel"><span class="challenge-kicker">${currentCard.title}</span><h4>${currentCard.description}</h4><div class="target-choices${currentCard.actionId === "shield" || currentCard.actionId === "double-damage" ? " is-self-only" : ""}">${(currentCard.actionId === "shield" || currentCard.actionId === "double-damage" ? [activePlayer] : getAlivePlayers().filter((player) => player.id !== activePlayer.id)).map((player) => `<button type="button" data-target-id="${player.id}" ${canControlCurrentTurn && !turnState.isResolving ? "" : "disabled"}>${player.id === activePlayer.id ? "Use on yourself" : player.name}</button>`).join("")}</div></div>`
     : "";
 
-  const currentCardHtml = currentCard
-    ? currentCard.isRevealed ? `
+  const drawnCardPicker = turnState.isChoosingDrawnCard && currentCard
+    ? `<div class="choice-panel drawn-card-choice"><span class="challenge-kicker">Card drawn</span><h4>Use ${currentCard.type === "question" ? "this question" : currentCard.title} now, or keep it for later?</h4><div class="draw-choice-actions"><button type="button" data-draw-choice="use" ${canControlCurrentTurn ? "" : "disabled"}>Use now</button><button type="button" data-draw-choice="keep" ${canControlCurrentTurn ? "" : "disabled"}>Keep card</button></div></div>`
+    : "";
+
+  const questionAttackPicker = turnState.pendingAttackDamage > 0
+    ? `<div class="choice-panel question-attack-choice"><span class="challenge-kicker">Correct answer · ${turnState.pendingAttackDamage} damage</span><h4>Choose a rival to attack</h4><div class="target-choices">${getAlivePlayers().filter((player) => player.id !== activePlayer.id).map((player) => `<button type="button" data-question-target-id="${player.id}" ${canControlCurrentTurn ? "" : "disabled"}>Attack ${player.name}</button>`).join("")}</div></div>`
+    : "";
+
+  const currentCardHtml = questionAttackPicker || (currentCard
+    ? drawnCardPicker || (currentCard.isRevealed ? `
       <article class="featured-card">
         <img src="${currentCard.image}" alt="Question card">
         <div class="challenge-copy">
@@ -2105,8 +2264,8 @@ function renderTable() {
           ${isNpcPlayer(activePlayer) ? `<p class="solver-status">${activePlayer.name} is calculating...</p>` : answerForm}
         </div>
       </article>
-    ` : difficultyPicker || targetPicker
-    : `<div class="empty-card empty-card-state"><span>01</span><strong>${activePlayer?.turnsTaken === 0 ? "Draw a card" : "Choose your move"}</strong><p>${activePlayer?.turnsTaken === 0 ? "Every player's first turn begins with a draw." : "Draw to build your hand, or play a card from it."}</p></div>`;
+    ` : difficultyPicker || targetPicker)
+    : `<div class="empty-card empty-card-state"><span>01</span><strong>Choose your move</strong><p>Play one of your cards, or draw from the shared deck.</p></div>`);
 
   if (currentCardElement._renderedHtml !== currentCardHtml) {
     currentCardElement.innerHTML = currentCardHtml;
@@ -2115,6 +2274,8 @@ function renderTable() {
     currentCardElement.querySelector(".answer-form input")?.focus();
     currentCardElement.querySelectorAll("[data-tier]").forEach((button) => button.addEventListener("click", () => chooseQuestionDifficulty(button.dataset.tier)));
     currentCardElement.querySelectorAll("[data-target-id]").forEach((button) => button.addEventListener("click", () => playActionCard(Number(button.dataset.targetId))));
+    currentCardElement.querySelectorAll("[data-draw-choice]").forEach((button) => button.addEventListener("click", () => resolveDrawChoice(button.dataset.drawChoice === "use")));
+    currentCardElement.querySelectorAll("[data-question-target-id]").forEach((button) => button.addEventListener("click", () => playQuestionAttack(Number(button.dataset.questionTargetId))));
   }
 
   activeHandElement.querySelectorAll(".hand-card").forEach((button) => {
@@ -2269,8 +2430,72 @@ friendsModeButton.addEventListener("click", selectFriendsMode);
 copyLinkButton.addEventListener("click", () => {
   inviteLinkInput.select();
   document.execCommand("copy");
-  lobbyStatusElement.textContent = "Invite link copied.";
+  lobbyStatusElement.textContent = `Room code ${inviteLinkInput.value} copied.`;
 });
+
+roomCodeInput.addEventListener("input", () => {
+  const normalizedCode = roomCodeInput.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8);
+  roomCodeInput.value = normalizedCode;
+  roomCodeInput.removeAttribute("aria-invalid");
+});
+
+joinRoomForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const code = roomCodeInput.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+  if (code.length !== 8) {
+    roomCodeInput.setAttribute("aria-invalid", "true");
+    lobbyStatusElement.textContent = "Enter the full eight-character room code.";
+    roomCodeInput.focus();
+    return;
+  }
+
+  roomCodeInput.disabled = true;
+  joinRoomForm.querySelector("button").disabled = true;
+  lobbyStatusElement.textContent = `Joining table ${code}...`;
+  await connectToRoom(code, false);
+  roomCodeInput.disabled = false;
+  joinRoomForm.querySelector("button").disabled = false;
+});
+
+playerNameInput.addEventListener("input", () => {
+  localPlayerName = sanitizePlayerName(playerNameInput.value);
+  sessionStorage.setItem("league-player-name", localPlayerName);
+
+  if (lobbyMode === "npc") {
+    lobbyPlayers[0] = localPlayerName;
+    renderLobby();
+  } else if (lobbyMode === "friends" && roomChannel) {
+    window.clearTimeout(namePresenceTimer);
+    namePresenceTimer = window.setTimeout(updateLocalPresenceName, 250);
+  } else {
+    lobbyPlayers[0] = localPlayerName;
+    renderLobby();
+  }
+});
+
+playerNameInput.addEventListener("change", () => {
+  localPlayerName = sanitizePlayerName(playerNameInput.value);
+  playerNameInput.value = localPlayerName;
+  sessionStorage.setItem("league-player-name", localPlayerName);
+  if (lobbyMode === "friends") updateLocalPresenceName();
+});
+
+function syncFullscreenButton() {
+  const isFullscreen = Boolean(document.fullscreenElement);
+  fullscreenButton.innerHTML = `<span aria-hidden="true">${isFullscreen ? "⊡" : "⛶"}</span> ${isFullscreen ? "Exit Fullscreen" : "Fullscreen"}`;
+  fullscreenButton.setAttribute("aria-pressed", String(isFullscreen));
+}
+
+fullscreenButton.addEventListener("click", async () => {
+  if (document.fullscreenElement) {
+    await document.exitFullscreen();
+  } else {
+    await document.documentElement.requestFullscreen();
+  }
+});
+document.addEventListener("fullscreenchange", syncFullscreenButton);
+document.addEventListener("fullscreenchange", syncDesktopGameStage);
 
 startMatchButton.addEventListener("click", () => {
   if (getJoinedLobbyPlayers().length < 2) {
@@ -2382,3 +2607,4 @@ renderRules();
 renderConcepts();
 renderAudioSettings();
 syncDesktopGameStage();
+syncFullscreenButton();

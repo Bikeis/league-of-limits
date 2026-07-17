@@ -60,15 +60,32 @@
           <p id="lobby-status">Choose a match type.</p>
         </div>
 
+        <label class="player-name-field" for="player-name-input">
+          <span>Your table name</span>
+          <input id="player-name-input" type="text" maxlength="18" autocomplete="nickname" placeholder="Enter your name">
+        </label>
+
         <div id="lobby-slots" class="lobby-slots"></div>
 
-        <div id="invite-panel" class="invite-panel" hidden>
-          <label for="invite-link">Invite Link</label>
+        <div id="invite-panel" class="invite-panel room-code-panel" hidden>
+          <label for="invite-link">Your Room Code</label>
           <div class="invite-row">
-            <input id="invite-link" type="text" readonly value="">
-            <button id="copy-link-button" class="secondary-button" type="button">Copy</button>
+            <input id="invite-link" class="room-code-display" type="text" readonly value="">
+            <button id="copy-link-button" class="secondary-button" type="button">Copy Code</button>
           </div>
+          <small>Share this code with friends so they can join your table.</small>
         </div>
+
+        <form id="join-room-form" class="join-room-form" hidden>
+          <div>
+            <label for="room-code-input">Join another room</label>
+            <small>Enter the eight-character code shared by your friend.</small>
+          </div>
+          <div class="join-room-row">
+            <input id="room-code-input" type="text" maxlength="8" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="AB12CD34">
+            <button class="secondary-button" type="submit">Join Table</button>
+          </div>
+        </form>
 
         <div class="lobby-actions">
           <button id="start-match-button" class="start-button" type="button" disabled>Start Match</button>
@@ -124,10 +141,11 @@
             <p id="feedback-message" aria-live="polite">Roll dice to determine turn order.</p>
             <div class="primary-actions">
               <button id="roll-order-button" class="control-button roll-button" type="button"><span class="roll-button-icon" aria-hidden="true">⚄</span><span>Roll Dice</span></button>
-              <button id="draw-card-button" class="control-button" type="button">Draw &amp; End Turn</button>
+              <button id="draw-card-button" class="control-button" type="button">Draw a Card</button>
             </div>
           </section>
           <div class="leave-actions">
+            <button id="fullscreen-button" class="settings-button fullscreen-button" type="button"><span aria-hidden="true">⛶</span> Fullscreen</button>
             <button id="settings-button" class="settings-button" type="button" aria-haspopup="dialog" aria-controls="settings-modal"><span aria-hidden="true">⚙</span> Settings</button>
             <button id="back-button" class="control-button leave-button" type="button"><span aria-hidden="true">←</span> Leave Match</button>
           </div>
@@ -191,7 +209,7 @@
           <div id="concept-list" class="concept-list"></div>
         </section>
 
-        <p class="how-tip"><strong>Quick tip:</strong> Drawing ends your turn, so build your hand with intention. Played cards stack in the center and become the new deck when the draw pile empties. At 0 HP, you are eliminated.</p>
+        <p class="how-tip"><strong>Quick tip:</strong> You may play a starting card immediately. After drawing, use that card now or keep it for a later turn. Played cards stack in the center and become the new deck when the draw pile empties. At 0 HP, you are eliminated.</p>
       </div>
     </dialog>
 

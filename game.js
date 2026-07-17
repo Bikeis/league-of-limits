@@ -3,7 +3,7 @@
 const SUPABASE_URL = "https://wnbxdoesaaafesvpkbvv.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_DbsYeFZT8kQdY4euO5PSTw_c8566AiQ";
 const realtimeClient = window.supabase?.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY) || null;
-const MULTIPLAYER_BUILD = "multiplayer-4";
+const MULTIPLAYER_BUILD = "ui-9";
 document.documentElement.dataset.multiplayerBuild = MULTIPLAYER_BUILD;
 
 const startScreen = document.querySelector("#start-screen");
@@ -496,6 +496,7 @@ function broadcastRoomState() {
 function applyRoomState(state) {
   if (!state || isRoomHost) return;
   isApplyingRoomState = true;
+  const wasRollPhase = !turnState.isStarted;
   if (state.turnState?.isStarted || state.players?.length) {
     lobbyScreen.hidden = true;
     gameScreen.hidden = false;
@@ -517,7 +518,11 @@ function applyRoomState(state) {
   Object.assign(turnState, state.turnState || {});
   usedQuestionPrompts = new Set(state.usedQuestionPrompts || []);
   feedbackElement.innerHTML = state.feedbackHtml || "";
-  renderAll();
+  if (wasRollPhase && !turnState.isStarted) {
+    renderRollPhase();
+  } else {
+    renderAll();
+  }
   timerDisplayElement.textContent = state.timerText || "--";
   timerDisplayElement.classList.toggle("is-urgent", Boolean(state.timerUrgent));
   isApplyingRoomState = false;
@@ -720,7 +725,10 @@ function showToast(message, type = "info") {
   toastElement.textContent = message;
   toastElement.className = `toast is-visible ${type}`;
   toastTimer = window.setTimeout(() => {
-    toastElement.className = "toast";
+    toastElement.className = `toast is-leaving ${type}`;
+    toastTimer = window.setTimeout(() => {
+      toastElement.className = "toast";
+    }, 420);
   }, 3200);
 }
 
@@ -876,22 +884,15 @@ function rollTurnOrder() {
   rollingPlayer.dice = null;
   rollingPlayer.diceValues = [rollDie(), rollDie()];
   setFeedback(`${rollingPlayer.name} is rolling...`, "Lowest roll goes first.");
-  renderAll();
-
-  rollAnimationTimer = window.setInterval(() => {
-    rollingPlayer.diceValues = [rollDie(), rollDie()];
-    updateRollingDice(rollingPlayer.diceValues);
-  }, 115);
+  renderRollPhase();
 
   window.setTimeout(() => {
-    window.clearInterval(rollAnimationTimer);
-    rollAnimationTimer = null;
     const firstDie = rollDie();
     const secondDie = rollDie();
     rollingPlayer.diceValues = [firstDie, secondDie];
     rollingPlayer.dice = firstDie + secondDie;
     setFeedback(`${rollingPlayer.name} rolled ${rollingPlayer.dice}.`, "Lowest roll goes first.");
-    renderAll();
+    renderRollPhase();
 
     window.setTimeout(() => {
     turnState.rollingPlayerIndex += 1;
@@ -904,7 +905,7 @@ function rollTurnOrder() {
 
     const nextRoller = getRollingPlayer();
     setFeedback("Roll the dice", `${nextRoller.name} rolls next. Lowest roll goes first.`);
-    renderAll();
+    renderRollPhase();
 
     if (lobbyMode === "npc" && isNpcPlayer(nextRoller)) {
       npcTimeout = window.setTimeout(rollTurnOrder, 2200);
@@ -1635,9 +1636,11 @@ function renderDiceRollPanel() {
   diceRollPanelElement.innerHTML = visiblePlayer
     ? `
       <div class="dice-center${turnState.isRolling ? " is-rolling" : ""}">
-        <div class="dice-phase-label">Turn order</div>
-        <div class="dice-title">${visiblePlayer.name}</div>
-        <p class="dice-instruction">${visiblePlayer.dice ? "Roll complete" : turnState.isRolling ? "Rolling the dice..." : "Lowest total takes the first turn"}</p>
+        <div class="dice-copy">
+          <div class="dice-phase-label">Turn order</div>
+          <div class="dice-title">${visiblePlayer.name}</div>
+          <p class="dice-instruction">${visiblePlayer.dice ? "Roll complete" : turnState.isRolling ? "Rolling the dice..." : "Lowest total takes the first turn"}</p>
+        </div>
         <div class="dice-row">
           ${(visiblePlayer.diceValues.length === 2 ? visiblePlayer.diceValues : [1, 1]).map(renderDie).join("")}
         </div>
@@ -1812,12 +1815,31 @@ function renderCardBacks(cards) {
   `).join("");
 }
 
+function getHandSignature(player) {
+  if (!player) return "";
+  return `${player.id}:${player.hand.map((card) => `${card.type}:${card.actionId || card.title || card.image}`).join("|")}`;
+}
+
+function getHandCardKeys(player) {
+  if (!player) return [];
+  const occurrences = new Map();
+  return player.hand.map((card) => {
+    const identity = `${card.type}:${card.actionId || card.title || card.image}`;
+    const occurrence = occurrences.get(identity) || 0;
+    occurrences.set(identity, occurrence + 1);
+    return `${identity}:${occurrence}`;
+  });
+}
+
 function renderTable() {
   const activePlayer = getActivePlayer();
   const bottomPlayer = lobbyMode === "npc"
     ? players.find((player) => player.id === 1)
     : getLocalGamePlayer() || activePlayer;
   const opponents = players.filter((player) => !bottomPlayer || player.id !== bottomPlayer.id);
+  const previousHandCards = activeHandElement.querySelector(".hand-cards");
+  const handSignature = getHandSignature(bottomPlayer);
+  const handCardKeys = getHandCardKeys(bottomPlayer);
   tableLayoutElement.dataset.players = String(players.length);
 
   renderOpponentSlot(topOpponentElement, opponents[0], "horizontal");
@@ -1834,7 +1856,9 @@ function renderTable() {
       `)
       .join("")
     : "";
-  const canAnswerCurrentCard = Boolean(currentCard?.isRevealed && activePlayer && bottomPlayer && activePlayer.id === bottomPlayer.id && !isNpcPlayer(activePlayer));
+  const canControlCurrentTurn = Boolean(activePlayer && bottomPlayer && activePlayer.id === bottomPlayer.id && !isNpcPlayer(activePlayer));
+  const canPlayHand = Boolean(canControlCurrentTurn && activePlayer.turnsTaken > 0 && !turnState.hasDrawn && !turnState.isResolving && !currentCard);
+  const canAnswerCurrentCard = Boolean(currentCard?.isRevealed && canControlCurrentTurn);
   const answerForm = canAnswerCurrentCard
     ? `
       <form class="answer-form">
@@ -1845,13 +1869,12 @@ function renderTable() {
     `
     : "";
 
-  activeHandElement.innerHTML = activePlayer
+  const activeHandHtml = activePlayer
     ? `
       <article class="active-seat${bottomPlayer.isEliminated ? " is-eliminated" : ""}${activePlayer.id === bottomPlayer.id ? " is-active" : ""}">
         <header class="active-player-header">
-          <div class="player-avatar" aria-hidden="true">${getPlayerInitials(bottomPlayer.name)}</div>
           <div class="active-player-identity">
-            <span>You are playing<br>as</span>
+            <span>Player status</span>
             <p>${bottomPlayer.name}</p>
           </div>
           <span class="turn-pill">${activePlayer.id === bottomPlayer.id ? "Your turn" : "Waiting"}</span>
@@ -1870,14 +1893,62 @@ function renderTable() {
     `
     : "";
 
+  if (!activePlayer) {
+    activeHandElement.innerHTML = "";
+    delete activeHandElement.dataset.playerId;
+  } else if (activeHandElement.dataset.playerId !== String(bottomPlayer.id) || !previousHandCards) {
+    activeHandElement.innerHTML = activeHandHtml;
+    activeHandElement.dataset.playerId = String(bottomPlayer.id);
+    activeHandElement.querySelector(".hand-cards")._handSignature = handSignature;
+  } else {
+    const nextHandContent = document.createElement("div");
+    nextHandContent.innerHTML = activeHandHtml;
+    const currentActiveSeat = activeHandElement.querySelector(".active-seat");
+    const nextActiveSeat = nextHandContent.querySelector(".active-seat");
+    if (currentActiveSeat && nextActiveSeat) {
+      currentActiveSeat.className = nextActiveSeat.className;
+      currentActiveSeat.querySelector(".active-player-identity p").textContent = nextActiveSeat.querySelector(".active-player-identity p").textContent;
+      currentActiveSeat.querySelector(".turn-pill").textContent = nextActiveSeat.querySelector(".turn-pill").textContent;
+      currentActiveSeat.querySelectorAll(".vital-row").forEach((vitalRow, index) => {
+        const nextVitalRow = nextActiveSeat.querySelectorAll(".vital-row")[index];
+        vitalRow.querySelector("em").textContent = nextVitalRow.querySelector("em").textContent;
+        vitalRow.querySelector(".vital-track i").style.width = nextVitalRow.querySelector(".vital-track i").style.width;
+      });
+    }
+
+    if (previousHandCards._handSignature !== handSignature) {
+      const nextHandCards = nextHandContent.querySelector(".hand-cards");
+      const previousCardsByKey = new Map(
+        [...previousHandCards.querySelectorAll(".hand-card")].map((button) => [button._cardKey, button]),
+      );
+      nextHandCards.querySelectorAll(".hand-card").forEach((nextButton, index) => {
+        const previousButton = previousCardsByKey.get(handCardKeys[index]);
+        if (!previousButton) return;
+        previousButton.className = nextButton.className;
+        previousButton.style.cssText = nextButton.style.cssText;
+        previousButton.dataset.handIndex = String(index);
+        nextButton.replaceWith(previousButton);
+      });
+      nextHandCards._handSignature = handSignature;
+      previousHandCards.replaceWith(nextHandCards);
+      activeHandElement.querySelector(".your-card-count").innerHTML = `<strong>${bottomPlayer.hand.length}</strong> card${bottomPlayer.hand.length === 1 ? "" : "s"}`;
+    }
+  }
+
+  activeHandElement.querySelectorAll(".hand-card").forEach((button, index) => {
+    button._cardKey = handCardKeys[index];
+    button.disabled = !canPlayHand;
+    button.classList.toggle("is-selected", canControlCurrentTurn && index === selectedHandIndex);
+  });
+
   const difficultyPicker = currentCard?.type === "question" && !currentCard.isRevealed
-    ? `<div class="choice-panel"><span class="challenge-kicker">Choose your stakes</span><h4>How difficult should this question be?</h4><div class="difficulty-choices">${difficultyTiers.map((tier) => `<button type="button" data-tier="${tier.name}"><strong>${tier.name}</strong><span>${tier.calculusPoints} CP · ${tier.damage} DMG · ${tier.timeLimit}s</span></button>`).join("")}</div></div>`
+    ? `<div class="choice-panel"><span class="challenge-kicker">Choose your stakes</span><h4>How difficult should this question be?</h4><div class="difficulty-choices">${difficultyTiers.map((tier) => `<button type="button" data-tier="${tier.name}" ${canControlCurrentTurn && !turnState.isResolving ? "" : "disabled"}><strong>${tier.name}</strong><span>${tier.calculusPoints} CP · ${tier.damage} DMG · ${tier.timeLimit}s</span></button>`).join("")}</div></div>`
     : "";
   const targetPicker = currentCard?.type === "action"
-    ? `<div class="choice-panel"><span class="challenge-kicker">${currentCard.title}</span><h4>${currentCard.description}</h4><div class="target-choices${currentCard.actionId === "shield" || currentCard.actionId === "double-damage" ? " is-self-only" : ""}">${(currentCard.actionId === "shield" || currentCard.actionId === "double-damage" ? [activePlayer] : getAlivePlayers().filter((player) => player.id !== activePlayer.id)).map((player) => `<button type="button" data-target-id="${player.id}" ${turnState.isResolving ? "disabled" : ""}>${player.id === activePlayer.id ? "Use on yourself" : player.name}</button>`).join("")}</div></div>`
+    ? `<div class="choice-panel"><span class="challenge-kicker">${currentCard.title}</span><h4>${currentCard.description}</h4><div class="target-choices${currentCard.actionId === "shield" || currentCard.actionId === "double-damage" ? " is-self-only" : ""}">${(currentCard.actionId === "shield" || currentCard.actionId === "double-damage" ? [activePlayer] : getAlivePlayers().filter((player) => player.id !== activePlayer.id)).map((player) => `<button type="button" data-target-id="${player.id}" ${canControlCurrentTurn && !turnState.isResolving ? "" : "disabled"}>${player.id === activePlayer.id ? "Use on yourself" : player.name}</button>`).join("")}</div></div>`
     : "";
 
-  currentCardElement.innerHTML = currentCard
+  const currentCardHtml = currentCard
     ? currentCard.isRevealed ? `
       <article class="featured-card">
         <img src="${currentCard.image}" alt="Question card">
@@ -1892,12 +1963,18 @@ function renderTable() {
     ` : difficultyPicker || targetPicker
     : `<div class="empty-card empty-card-state"><span>01</span><strong>${activePlayer?.turnsTaken === 0 ? "Draw a card" : "Choose your move"}</strong><p>${activePlayer?.turnsTaken === 0 ? "Every player's first turn begins with a draw." : "Draw to build your hand, or play a card from it."}</p></div>`;
 
-  currentCardElement.querySelector(".answer-form")?.addEventListener("submit", submitAnswer);
-  currentCardElement.querySelector(".answer-form input")?.focus();
-  currentCardElement.querySelectorAll("[data-tier]").forEach((button) => button.addEventListener("click", () => chooseQuestionDifficulty(button.dataset.tier)));
-  currentCardElement.querySelectorAll("[data-target-id]").forEach((button) => button.addEventListener("click", () => playActionCard(Number(button.dataset.targetId))));
+  if (currentCardElement._renderedHtml !== currentCardHtml) {
+    currentCardElement.innerHTML = currentCardHtml;
+    currentCardElement._renderedHtml = currentCardHtml;
+    currentCardElement.querySelector(".answer-form")?.addEventListener("submit", submitAnswer);
+    currentCardElement.querySelector(".answer-form input")?.focus();
+    currentCardElement.querySelectorAll("[data-tier]").forEach((button) => button.addEventListener("click", () => chooseQuestionDifficulty(button.dataset.tier)));
+    currentCardElement.querySelectorAll("[data-target-id]").forEach((button) => button.addEventListener("click", () => playActionCard(Number(button.dataset.targetId))));
+  }
 
   activeHandElement.querySelectorAll(".hand-card").forEach((button) => {
+    if (button.dataset.clickBound === "true") return;
+    button.dataset.clickBound = "true";
     button.addEventListener("click", () => {
       playSound("select");
       playSelectedCard(Number(button.dataset.handIndex));
@@ -1908,20 +1985,22 @@ function renderTable() {
 function renderOpponentSlot(element, player, direction) {
   if (!player) {
     element.innerHTML = "";
+    delete element.dataset.playerId;
     return;
   }
 
   const isActive = getActivePlayer()?.id === player.id;
+  const previousMiniHand = element.querySelector(".mini-hand");
+  const handSignature = getHandSignature(player);
 
-  element.innerHTML = `
+  const opponentHtml = `
     <article class="table-player ${direction}${player.isEliminated ? " is-eliminated" : ""}${isActive ? " is-active" : ""}">
       <div class="player-badge">
         <div class="opponent-identity">
-          <span class="seat-avatar" aria-hidden="true">${getPlayerInitials(player.name)}</span>
-          <div class="player-title"><span>${isActive ? "Playing now" : "Opponent"}</span><p>${player.name}</p></div>
+          <div class="player-title"><span>${isActive ? "Current turn" : "Player status"}</span><p>${player.name}</p></div>
         </div>
         ${renderPlayerVitals(player)}
-        <small class="status-chip">${getPlayerStatus(player)}</small>
+        ${getPlayerStatus(player) === "Ready" ? "" : `<small class="status-chip">${getPlayerStatus(player)}</small>`}
       </div>
       <div class="mini-hand ${direction}" aria-label="${player.name} has ${player.hand.length} cards">
         ${renderCardBacks(player.hand)}
@@ -1929,6 +2008,38 @@ function renderOpponentSlot(element, player, direction) {
       </div>
     </article>
   `;
+
+  if (element.dataset.playerId !== String(player.id) || !previousMiniHand) {
+    element.innerHTML = opponentHtml;
+    element.dataset.playerId = String(player.id);
+    element.querySelector(".mini-hand")._handSignature = handSignature;
+    return;
+  }
+
+  const nextOpponentContent = document.createElement("div");
+  nextOpponentContent.innerHTML = opponentHtml;
+  const currentPlayerArticle = element.querySelector(".table-player");
+  const nextPlayerArticle = nextOpponentContent.querySelector(".table-player");
+  currentPlayerArticle.className = nextPlayerArticle.className;
+  const currentPlayerBadge = currentPlayerArticle.querySelector(".player-badge");
+  const nextPlayerBadge = nextPlayerArticle.querySelector(".player-badge");
+  currentPlayerBadge.querySelector(".player-title span").textContent = nextPlayerBadge.querySelector(".player-title span").textContent;
+  currentPlayerBadge.querySelector(".player-title p").textContent = nextPlayerBadge.querySelector(".player-title p").textContent;
+  currentPlayerBadge.querySelectorAll(".vital-row").forEach((vitalRow, index) => {
+    const nextVitalRow = nextPlayerBadge.querySelectorAll(".vital-row")[index];
+    vitalRow.querySelector("em").textContent = nextVitalRow.querySelector("em").textContent;
+    vitalRow.querySelector(".vital-track i").style.width = nextVitalRow.querySelector(".vital-track i").style.width;
+  });
+  currentPlayerBadge.querySelector(".status-chip")?.remove();
+  if (nextPlayerBadge.querySelector(".status-chip")) {
+    currentPlayerBadge.append(nextPlayerBadge.querySelector(".status-chip"));
+  }
+
+  if (previousMiniHand._handSignature !== handSignature) {
+    const nextMiniHand = nextPlayerArticle.querySelector(".mini-hand");
+    nextMiniHand._handSignature = handSignature;
+    previousMiniHand.replaceWith(nextMiniHand);
+  }
 }
 
 function renderAll() {
@@ -1939,6 +2050,12 @@ function renderAll() {
   renderConcepts();
   renderDeckCounts();
   renderTable();
+  broadcastRoomState();
+}
+
+function renderRollPhase() {
+  renderTurnSystem();
+  renderDiceRollPanel();
   broadcastRoomState();
 }
 

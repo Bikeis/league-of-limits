@@ -3,7 +3,7 @@
 const SUPABASE_URL = "https://wnbxdoesaaafesvpkbvv.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_DbsYeFZT8kQdY4euO5PSTw_c8566AiQ";
 const realtimeClient = window.supabase?.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY) || null;
-const MULTIPLAYER_BUILD = "ui-9";
+const MULTIPLAYER_BUILD = "ui-10";
 document.documentElement.dataset.multiplayerBuild = MULTIPLAYER_BUILD;
 
 const startScreen = document.querySelector("#start-screen");
@@ -70,6 +70,11 @@ const finalStandingsListElement = document.querySelector("#final-standings-list"
 const playAgainButton = document.querySelector("#play-again-button");
 const gameOverLobbyButton = document.querySelector("#game-over-lobby-button");
 const playAgainNote = document.querySelector("#play-again-note");
+const rematchVotePanel = document.querySelector("#rematch-vote-panel");
+const rematchVoteCountElement = document.querySelector("#rematch-vote-count");
+const rematchVoteRequiredElement = document.querySelector("#rematch-vote-required");
+const rematchVoteStatusElement = document.querySelector("#rematch-vote-status");
+const rematchVoteFillElement = document.querySelector("#rematch-vote-fill");
 const volumeInputs = {
   master: document.querySelector("#master-volume"),
   ui: document.querySelector("#ui-volume"),
@@ -299,6 +304,7 @@ let roomSyncTimer = null;
 let matchStartedAt = 0;
 let gameOverShown = false;
 let isApplyingRoomState = false;
+const rematchVotes = new Set();
 const localRoomPlayerId = sessionStorage.getItem("league-player-id") || crypto.randomUUID();
 sessionStorage.setItem("league-player-id", localRoomPlayerId);
 
@@ -506,6 +512,7 @@ function buildRoomState() {
     timerUrgent: timerDisplayElement.classList.contains("is-urgent"),
     matchStartedAt,
     gameOverShown,
+    rematchVotes: [...rematchVotes],
   };
 }
 
@@ -536,6 +543,8 @@ function applyRoomState(state) {
   currentCard = state.currentCard || null;
   selectedHandIndex = state.selectedHandIndex ?? -1;
   matchStartedAt = state.matchStartedAt || matchStartedAt;
+  rematchVotes.clear();
+  (state.rematchVotes || []).forEach((playerId) => rematchVotes.add(playerId));
   const shouldShowGameOver = Boolean(state.turnState?.isMatchOver && !gameOverShown);
   Object.assign(turnState, state.turnState || {});
   usedQuestionPrompts = new Set(state.usedQuestionPrompts || []);
@@ -549,6 +558,7 @@ function applyRoomState(state) {
   timerDisplayElement.classList.toggle("is-urgent", Boolean(state.timerUrgent));
   isApplyingRoomState = false;
   if (shouldShowGameOver) showGameOver();
+  if (gameOverModal.open) renderRematchVote();
 }
 
 function requestHostAction(action, data = {}) {
@@ -567,10 +577,8 @@ function replaceDisconnectedPlayersWithNpcs() {
 
   roomSeatPlayerIds.forEach((roomPlayerId, seatIndex) => {
     if (!roomPlayerId || connectedIds.has(roomPlayerId) || !players[seatIndex]) return;
-    const player = players[seatIndex];
-    player.name = `NPC ${seatIndex + 1}`;
-    roomSeatPlayerIds[seatIndex] = null;
-    replacements.push(player.name);
+    const npcName = replaceRoomSeatWithNpc(roomPlayerId);
+    if (npcName) replacements.push(npcName);
   });
 
   if (replacements.length === 0) return;
@@ -579,6 +587,13 @@ function replaceDisconnectedPlayersWithNpcs() {
     : `${replacements.join(" and ")} have taken over the empty seats.`;
   setFeedback("A player left the match", message);
   showToast(message, "info");
+
+  if (turnState.isMatchOver) {
+    renderRematchVote();
+    if (!maybeStartMultiplayerRematch()) broadcastRoomState();
+    return;
+  }
+
   renderAll();
   broadcastRoomState();
 
@@ -634,6 +649,17 @@ function handleGuestAction(payload) {
   const requestingPlayer = getGamePlayerForRoomId(payload.playerId);
   const activePlayer = getActivePlayer();
   const { action, data = {} } = payload;
+
+  if (action === "rematch_vote") {
+    registerRematchVote(payload.playerId);
+    return;
+  }
+
+  if (action === "rematch_leave") {
+    handleRematchDeparture(payload.playerId);
+    return;
+  }
+
   const expectedPlayer = action === "roll" ? getRollingPlayer() : activePlayer;
 
   if (!requestingPlayer || requestingPlayer.id !== expectedPlayer?.id || turnState.isResolving) return;
@@ -854,6 +880,7 @@ function resetGame(playerNames = getJoinedLobbyPlayers()) {
   usedQuestionPrompts = new Set();
   matchStartedAt = Date.now();
   gameOverShown = false;
+  rematchVotes.clear();
   if (gameOverModal.open) gameOverModal.close();
   players.forEach((player) => {
     for (let count = 0; count < 3; count += 1) {
@@ -1225,6 +1252,88 @@ function getMatchWinner() {
     || [...players].sort((a, b) => b.calculusPoints - a.calculusPoints || b.health - a.health)[0];
 }
 
+function getRequiredRematchVoterIds() {
+  return roomSeatPlayerIds.filter(Boolean);
+}
+
+function renderRematchVote() {
+  const isMultiplayerRematch = lobbyMode === "friends" && turnState.isMatchOver;
+  rematchVotePanel.hidden = !isMultiplayerRematch;
+  playAgainNote.hidden = true;
+
+  if (!isMultiplayerRematch) {
+    playAgainButton.hidden = false;
+    playAgainButton.disabled = false;
+    playAgainButton.textContent = "Play Again";
+    playAgainButton.removeAttribute("aria-pressed");
+    return;
+  }
+
+  const requiredVoters = getRequiredRematchVoterIds();
+  const acceptedVotes = requiredVoters.filter((playerId) => rematchVotes.has(playerId));
+  const localHasVoted = rematchVotes.has(localRoomPlayerId);
+  const remainingVotes = Math.max(0, requiredVoters.length - acceptedVotes.length);
+  const percentage = requiredVoters.length > 0 ? (acceptedVotes.length / requiredVoters.length) * 100 : 0;
+
+  rematchVoteCountElement.textContent = String(acceptedVotes.length);
+  rematchVoteRequiredElement.textContent = String(requiredVoters.length);
+  rematchVoteFillElement.style.width = `${percentage}%`;
+  rematchVoteStatusElement.textContent = remainingVotes === 0
+    ? "The rematch oath is complete. Preparing the table..."
+    : localHasVoted
+      ? `Your vote is sealed. Waiting for ${remainingVotes} more.`
+      : "Every connected player must agree before the next match begins.";
+
+  playAgainButton.hidden = false;
+  playAgainButton.disabled = localHasVoted || !requiredVoters.includes(localRoomPlayerId);
+  playAgainButton.textContent = localHasVoted ? "Rematch Voted" : "Vote Play Again";
+  playAgainButton.setAttribute("aria-pressed", String(localHasVoted));
+}
+
+function startMultiplayerRematch() {
+  if (!isRoomHost || lobbyMode !== "friends" || !turnState.isMatchOver) return;
+  const rematchPlayers = players.map((player) => player.name);
+  resetGame(rematchPlayers);
+  sendRoomEvent("match_start", { state: buildRoomState() });
+  startRoomSyncHeartbeat();
+}
+
+function maybeStartMultiplayerRematch() {
+  if (!isRoomHost || lobbyMode !== "friends" || !turnState.isMatchOver) return false;
+  const requiredVoters = getRequiredRematchVoterIds();
+  if (requiredVoters.length === 0 || !requiredVoters.every((playerId) => rematchVotes.has(playerId))) return false;
+  startMultiplayerRematch();
+  return true;
+}
+
+function registerRematchVote(roomPlayerId) {
+  if (!isRoomHost || lobbyMode !== "friends" || !turnState.isMatchOver) return;
+  if (!getRequiredRematchVoterIds().includes(roomPlayerId) || rematchVotes.has(roomPlayerId)) return;
+  rematchVotes.add(roomPlayerId);
+  renderRematchVote();
+  showToast("A player has sworn the rematch oath.", "private");
+  if (!maybeStartMultiplayerRematch()) broadcastRoomState();
+}
+
+function replaceRoomSeatWithNpc(roomPlayerId) {
+  const seatIndex = roomSeatPlayerIds.indexOf(roomPlayerId);
+  if (seatIndex < 0 || !players[seatIndex]) return null;
+  const player = players[seatIndex];
+  player.name = `NPC ${seatIndex + 1}`;
+  roomSeatPlayerIds[seatIndex] = null;
+  rematchVotes.delete(roomPlayerId);
+  return player.name;
+}
+
+function handleRematchDeparture(roomPlayerId) {
+  if (!isRoomHost || lobbyMode !== "friends" || !turnState.isMatchOver) return;
+  const npcName = replaceRoomSeatWithNpc(roomPlayerId);
+  if (!npcName) return;
+  renderRematchVote();
+  showToast(`${npcName} will take the empty seat next match.`, "info");
+  if (!maybeStartMultiplayerRematch()) broadcastRoomState();
+}
+
 function showGameOver() {
   if (gameOverShown || !turnState.isMatchOver || players.length === 0) return;
   gameOverShown = true;
@@ -1252,15 +1361,29 @@ function showGameOver() {
       <span><b>${player.health}</b> HP</span>
     </article>
   `).join("");
-  const guest = isFriendsGuest();
-  playAgainButton.hidden = guest;
-  playAgainNote.hidden = !guest;
+  renderRematchVote();
   gameOverModal.showModal();
   playSound("win");
   broadcastRoomState();
 }
 
-function returnToLobbyFromGameOver() {
+async function returnToLobbyFromGameOver() {
+  if (lobbyMode === "friends" && roomChannel) {
+    if (isRoomHost) {
+      handleRematchDeparture(localRoomPlayerId);
+      const successor = roomPlayers.find((presence) => presence.playerId !== localRoomPlayerId);
+      if (successor) {
+        await sendRoomEvent("host_transfer", { successorId: successor.playerId, state: buildRoomState() });
+      }
+    } else {
+      await sendRoomEvent("player_action", { action: "rematch_leave", playerId: localRoomPlayerId });
+    }
+    await leaveRealtimeRoom();
+    lobbyMode = null;
+    lobbyPlayers = ["Player 1", null, null, null];
+    invitePanel.hidden = true;
+  }
+
   if (gameOverModal.open) gameOverModal.close();
   gameScreen.hidden = true;
   lobbyScreen.hidden = false;
@@ -1799,7 +1922,7 @@ async function connectToRoom(code, hostRoom = false) {
       window.setTimeout(() => {
         roomPlayers = getPresencePlayers();
         replaceDisconnectedPlayersWithNpcs();
-        resumeAuthoritativeTurn();
+        if (!maybeStartMultiplayerRematch()) resumeAuthoritativeTurn();
       }, 500);
     })
     .subscribe(async (status) => {
@@ -2174,12 +2297,18 @@ drawCardButton.addEventListener("click", drawCard);
 deckStackButton.addEventListener("click", drawCard);
 
 playAgainButton.addEventListener("click", () => {
-  if (isFriendsGuest()) return;
-  resetGame(players.map((player) => player.name));
-  if (lobbyMode === "friends" && isRoomHost) {
-    sendRoomEvent("match_start", { state: buildRoomState() });
-    startRoomSyncHeartbeat();
+  if (lobbyMode === "friends") {
+    if (isRoomHost) {
+      registerRematchVote(localRoomPlayerId);
+    } else {
+      requestHostAction("rematch_vote");
+      rematchVotes.add(localRoomPlayerId);
+      renderRematchVote();
+    }
+    return;
   }
+
+  resetGame(players.map((player) => player.name));
 });
 
 gameOverLobbyButton.addEventListener("click", returnToLobbyFromGameOver);

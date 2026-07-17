@@ -1959,7 +1959,7 @@ body.is-roll-phase .dice-center:not(.is-rolling) .die:nth-child(2) { animation-d
   #right-opponent .mini-hand.vertical { height: clamp(215px,36vh,274px); }
 }
 
-/* Uniform desktop stage: preserve the 2560x1440 composition at every 16:9 size */
+/* Uniform desktop stage with a larger, readable 2304x1296 reference UI */
 @media (min-width: 761px) {
   body.is-match .game-shell {
     position: relative;
@@ -1972,8 +1972,8 @@ body.is-roll-phase .dice-center:not(.is-rolling) .die:nth-child(2) { animation-d
     position: absolute;
     left: var(--game-stage-left,0);
     top: var(--game-stage-top,0);
-    width: 2560px;
-    height: 1440px;
+    width: 2304px;
+    height: 1296px;
     overflow: visible;
     zoom: var(--game-stage-scale,1);
   }
@@ -2120,3 +2120,129 @@ body.is-match #draw-card-button:not(:disabled) {
   from { opacity: 0; transform: translateY(10px) scale(.985); }
   to { opacity: 1; transform: none; }
 }
+
+/* Fantasy identity, fullscreen, and turn-choice controls */
+.player-name-field {
+  display: grid;
+  grid-template-columns: auto minmax(180px,320px);
+  gap: 14px;
+  align-items: center;
+  margin-bottom: 16px;
+  border: 1px solid rgba(199,143,45,.36);
+  border-radius: 4px;
+  padding: 12px 14px;
+  background: linear-gradient(145deg,rgba(22,27,18,.9),rgba(9,14,10,.94));
+}
+.player-name-field span { color: #d4a345; font: 900 .62rem var(--utility); letter-spacing: .14em; text-transform: uppercase; }
+.player-name-field input {
+  min-height: 42px;
+  border: 1px solid rgba(218,164,65,.4);
+  border-radius: 3px;
+  padding: 9px 12px;
+  outline: none;
+  background: #080d09;
+  color: #f1dfb3;
+  font: 700 1rem var(--serif);
+  box-shadow: inset 0 2px 6px rgba(0,0,0,.5);
+  transition: border-color .2s ease,box-shadow .2s ease;
+}
+.player-name-field input:focus { border-color: #ddb04d; box-shadow: 0 0 0 3px rgba(221,176,77,.1),inset 0 2px 6px rgba(0,0,0,.5); }
+
+.fullscreen-button[aria-pressed="true"] { border-color: #d9aa48; color: #f0ca71; }
+
+.draw-choice-actions { display: grid; grid-template-columns: repeat(2,minmax(130px,1fr)); gap: 10px; }
+.draw-choice-actions button,
+.question-attack-choice .target-choices button {
+  min-height: 48px;
+  border: 1px solid rgba(218,164,65,.45);
+  border-radius: 4px;
+  padding: 11px 14px;
+  background: linear-gradient(180deg,#252719,#12170f);
+  color: #ecd8a4;
+  font: 700 .9rem var(--serif);
+  box-shadow: 0 7px 16px rgba(0,0,0,.28),inset 0 1px rgba(255,224,144,.045);
+  transition: transform .2s var(--motion-smooth),border-color .2s ease,background .2s ease;
+}
+.draw-choice-actions button:hover,
+.question-attack-choice .target-choices button:hover { border-color: #dfb250; background: linear-gradient(180deg,#34301d,#191b11); transform: translateY(-2px); }
+.draw-choice-actions button:first-child { border-color: rgba(226,177,72,.72); background: linear-gradient(180deg,#74572a,#473316); color: #ffdf91; }
+
+body.is-match .turn-status { min-height: 54px; padding: 10px 18px; }
+body.is-match #active-player { font-size: 1.18rem; }
+.player-badge .player-title p { font-size: 1.22rem; }
+.active-player-identity p { font-size: 1.4rem; }
+.player-badge .vital-track,.active-seat .vital-track { min-height: 9px; }
+
+@media (max-width: 760px) {
+  .player-name-field { grid-template-columns: 1fr; gap: 7px; }
+  .draw-choice-actions { grid-template-columns: 1fr; }
+}
+
+/* Friends-table room code entry */
+.join-room-form {
+  display: grid;
+  grid-template-columns: minmax(190px,1fr) minmax(280px,1.2fr);
+  gap: 16px;
+  align-items: center;
+  margin: 0 0 16px;
+  border: 1px solid rgba(195,139,43,.42);
+  border-radius: 4px;
+  padding: 14px;
+  background:
+    radial-gradient(circle at 0 0,rgba(224,174,70,.08),transparent 42%),
+    linear-gradient(145deg,#171c13,#0a0f0a);
+  box-shadow: inset 0 0 0 1px rgba(255,224,144,.025),0 10px 22px rgba(0,0,0,.22);
+  animation: rematch-panel-in .35s var(--motion-smooth) both;
+}
+.join-room-form[hidden] { display: none; }
+.join-room-form > div:first-child { display: grid; gap: 4px; }
+.join-room-form label { color: #d8a746; font: 900 .62rem var(--utility); letter-spacing: .13em; text-transform: uppercase; }
+.join-room-form small { color: #968d79; font-size: .67rem; }
+.join-room-row { display: grid; grid-template-columns: minmax(120px,1fr) auto; gap: 8px; }
+.join-room-row input {
+  min-width: 0;
+  min-height: 43px;
+  border: 1px solid rgba(218,164,65,.42);
+  border-radius: 3px;
+  padding: 9px 12px;
+  outline: none;
+  background: #070c08;
+  color: #f0ca70;
+  font: 800 1rem var(--utility);
+  letter-spacing: .16em;
+  text-align: center;
+  text-transform: uppercase;
+  box-shadow: inset 0 2px 6px rgba(0,0,0,.55);
+}
+.join-room-row input:focus { border-color: #e2b34e; box-shadow: 0 0 0 3px rgba(226,179,78,.1),inset 0 2px 6px rgba(0,0,0,.55); }
+.join-room-row input[aria-invalid="true"] { border-color: #c85b47; box-shadow: 0 0 0 3px rgba(200,91,71,.1); }
+.join-room-row button { min-height: 43px; color: #e8ca82; }
+
+@media (max-width: 760px) {
+  .join-room-form { grid-template-columns: 1fr; }
+}
+
+.room-code-panel {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(214,157,52,.55);
+  border-radius: 4px;
+  padding: 14px;
+  background:
+    radial-gradient(circle at 50% -35%,rgba(232,184,77,.12),transparent 55%),
+    linear-gradient(145deg,#1b2116,#0a0f0a);
+  box-shadow: inset 0 0 0 1px rgba(255,224,144,.03),0 12px 24px rgba(0,0,0,.25);
+}
+.room-code-panel::before { position: absolute; left: 18px; right: 18px; top: 0; height: 1px; background: linear-gradient(90deg,transparent,#e3b64e 50%,transparent); content: ""; }
+.room-code-panel label { color: #d9a947; letter-spacing: .14em; }
+.room-code-panel > small { display: block; margin-top: 8px; color: #958b76; font-size: .66rem; }
+.room-code-display {
+  border-color: rgba(221,171,70,.5) !important;
+  border-radius: 3px !important;
+  background: #070c08 !important;
+  color: #f0c35e !important;
+  font: 900 1.08rem var(--utility);
+  letter-spacing: .2em;
+  text-align: center;
+}
+.room-code-panel .secondary-button { min-width: 112px; color: #e8ca82; }
